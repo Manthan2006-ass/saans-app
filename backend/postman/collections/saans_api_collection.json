@@ -1,0 +1,120 @@
+{
+  "info": {
+    "name": "SAANS 2.0 API Collection",
+    "description": "Collection of API requests for SAANS 2.0 Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Get Stations",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/stations?city=pune",
+          "host": ["{{base_url}}"],
+          "path": ["api", "stations"],
+          "query": [
+            {
+              "key": "city",
+              "value": "pune"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Station Forecast",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/forecast/station/:id",
+          "host": ["{{base_url}}"],
+          "path": ["api", "forecast", "station", ":id"],
+          "variable": [
+            {
+              "key": "id",
+              "value": "8118"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Compare Departure Times (Planner)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"city\": \"pune\",\n  \"plannedDeparture\": \"18:00\",\n  \"durationMinutes\": 45,\n  \"route\": \"Shivajinagar to PCCOE\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/forecast/compare",
+          "host": ["{{base_url}}"],
+          "path": ["api", "forecast", "compare"]
+        }
+      }
+    },
+    {
+      "name": "Get Spike Alerts",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/forecast/alerts/spikes?city=pune",
+          "host": ["{{base_url}}"],
+          "path": ["api", "forecast", "alerts", "spikes"],
+          "query": [
+            {
+              "key": "city",
+              "value": "pune"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Accountability Audit",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/accountability?city=pune",
+          "host": ["{{base_url}}"],
+          "path": ["api", "accountability"],
+          "query": [
+            {
+              "key": "city",
+              "value": "pune"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3001"
+    }
+  ]
+}

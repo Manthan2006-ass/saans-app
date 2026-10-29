@@ -1,0 +1,17 @@
+{
+  "name": "saans-backend",
+  "version": "2.0.0",
+  "description": "SAANS 2.0 Air Quality Forecasting & Exposure Decision Platform - Backend Service",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongoose": "^8.9.5",
+    "node-cron": "^3.0.3"
+  }
+}

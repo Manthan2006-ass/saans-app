@@ -1,0 +1,30 @@
+{
+  "name": "saans-data-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n \"backend,frontend\" -c \"cyan,magenta\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "node --watch backend/src/index.js",
+    "dev:frontend": "vite",
+    "start": "node backend/src/index.js",
+    "build:client": "vite build",
+    "build": "npm run build:client"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongoose": "^8.9.5",
+    "node-cron": "^3.0.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "vite": "^8.3.4"
+  }
+}
