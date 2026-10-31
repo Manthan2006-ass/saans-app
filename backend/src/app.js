@@ -10,6 +10,7 @@ import userRoutes from './routes/userRoutes.js';
 import alertRoutes from './routes/alertRoutes.js';
 import storeRoutes from './routes/storeRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import commuteRoutes from './routes/commuteRoutes.js';
 import { getStationForecast, compareDepartureTimes, getSpikeAlerts } from './controllers/forecastController.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 
@@ -51,6 +52,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/store', storeRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/commute', commuteRoutes);
 
 // Convenience & backward-compatible aliases
 app.get('/api/stations/:id/forecast', getStationForecast);

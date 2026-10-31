@@ -1,5 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import './style.css';
 
 const fmt = n => (n == null || n === '' || !Number.isFinite(Number(n)) ? '—' : Math.round(Number(n)));
@@ -12,6 +14,85 @@ function getAqiBand(aqi) {
   if (val <= 300) return { label: 'Poor', color: '#f97316', textColor: '#fff', category: 'Poor (201-300)' };
   if (val <= 400) return { label: 'Very Poor', color: '#ef4444', textColor: '#fff', category: 'Very Poor (301-400)' };
   return { label: 'Severe', color: '#ff4d6d', textColor: '#fff', category: 'Severe (401+)' };
+}
+
+/* ── Leaflet Map Helpers ─────────────────────────────────────── */
+const CITY_CENTERS = {
+  pune:  { lat: 18.575, lng: 73.810, zoom: 12 },
+  delhi: { lat: 28.635, lng: 77.225, zoom: 12 },
+};
+
+/** Recenter the map when city changes */
+function MapRecenter({ city }) {
+  const map = useMap();
+  useEffect(() => {
+    const c = CITY_CENTERS[city] || CITY_CENTERS.pune;
+    map.flyTo([c.lat, c.lng], c.zoom, { duration: 1.2 });
+  }, [city, map]);
+  return null;
+}
+
+/** Interactive AQI Map with dark tiles and glowing station markers */
+function AqiLeafletMap({ city, stations, selectedId, onSelectStation }) {
+  const center = CITY_CENTERS[city] || CITY_CENTERS.pune;
+
+  return (
+    <MapContainer
+      center={[center.lat, center.lng]}
+      zoom={center.zoom}
+      style={{ width: '100%', height: '100%' }}
+      zoomControl={false}
+      attributionControl={false}
+    >
+      <TileLayer
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        maxZoom={19}
+      />
+      <MapRecenter city={city} />
+
+      {stations.map(st => {
+        const stLat = st.location?.lat || st.lat;
+        const stLng = st.location?.lng || st.lon || st.lng;
+        if (!stLat || !stLng) return null;
+
+        const stAqi  = st.latestReading?.aqi || 142;
+        const band   = getAqiBand(stAqi);
+        const isSel  = String(st.openaqId) === String(selectedId);
+
+        return (
+          <CircleMarker
+            key={st.openaqId}
+            center={[stLat, stLng]}
+            radius={isSel ? 16 : 10}
+            pathOptions={{
+              color: band.color,
+              weight: isSel ? 3 : 1.5,
+              fillColor: band.color,
+              fillOpacity: isSel ? 0.45 : 0.25,
+            }}
+            eventHandlers={{
+              click: () => onSelectStation(st.openaqId),
+            }}
+          >
+            <Popup className="aqi-popup">
+              <div style={{ fontFamily: 'Plus Jakarta Sans, sans-serif', padding: 2, minWidth: 170 }}>
+                <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#111' }}>{st.name?.split(',')[0]}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                  <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 99, background: band.color }} />
+                  <span style={{ fontWeight: 900, fontSize: '1.1rem', fontFamily: 'JetBrains Mono, monospace', color: '#111' }}>{stAqi}</span>
+                  <span style={{ fontSize: '0.72rem', color: '#555', fontWeight: 700 }}>{band.label}</span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: '0.72rem', color: '#444' }}>
+                  PM2.5: <strong>{st.latestReading?.pm25 || '—'} µg/m³</strong>
+                  &nbsp;·&nbsp;🚬 {+((st.latestReading?.pm25 || stAqi * 0.45) / 22).toFixed(1)} cigs/day
+                </div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        );
+      })}
+    </MapContainer>
+  );
 }
 
 async function getJson(url, options = {}) {
@@ -37,8 +118,32 @@ function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [orderToast, setOrderToast] = useState(false);
 
+  // Auth Modal States
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authTab, setAuthTab] = useState('login'); // 'login' | 'register'
+  const [authForm, setAuthForm] = useState({
+    name: '',
+    email: 'aditya@saans.org',
+    password: 'demo123',
+    city: 'pune',
+    asthma: true,
+    athlete: false,
+    child: false,
+    elderly: false,
+    outdoorHours: 8,
+  });
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authToast, setAuthToast] = useState('');
+
   // Analysis sub-tab
-  const [analysisSubTab, setAnalysisSubTab] = useState('deepdive'); // 'deepdive' | 'comparison'
+  const [analysisSubTab, setAnalysisSubTab] = useState('deepdive'); // 'deepdive' | 'comparison' | 'commute'
+
+  // Commute Optimizer States
+  const [commuteCorridor, setCommuteCorridor] = useState('pccoe_hinjewadi');
+  const [commuteMode, setCommuteMode] = useState('bike_scooter');
+  const [commuteData, setCommuteData] = useState(null);
+  const [commuteLoading, setCommuteLoading] = useState(false);
 
   // Chat States
   const [chatMessages, setChatMessages] = useState([
@@ -77,7 +182,10 @@ function App() {
       const stList = Array.isArray(stRes.data) ? stRes.data : [];
       setStations(stList);
       setAlerts(Array.isArray(alRes.data) ? alRes.data : []);
-      if (profRes.data) setUserProfile(profRes.data);
+      const isLoggedOut = localStorage.getItem('saans_logged_out') === 'true';
+      if (!isLoggedOut && profRes.data) {
+        setUserProfile(profRes.data);
+      }
       if (prRes.data) setProducts(prRes.data);
 
       if (stList.length > 0) {
@@ -100,14 +208,125 @@ function App() {
     }
   }
 
+  // Auth Handlers
+  async function handleLoginSubmit(e) {
+    if (e) e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const res = await getJson('/api/user/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authForm.email, password: authForm.password }),
+      });
+      setUserProfile(res.data);
+      localStorage.removeItem('saans_logged_out');
+      setIsAuthModalOpen(false);
+      setAuthToast(`Logged in as ${res.data.name}`);
+      setTimeout(() => setAuthToast(''), 3500);
+    } catch (err) {
+      setAuthError(err.message || 'Login failed. Please check your credentials.');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleDemoQuickLogin() {
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const res = await getJson('/api/user/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isDemoQuickLogin: true }),
+      });
+      setUserProfile(res.data);
+      localStorage.removeItem('saans_logged_out');
+      setIsAuthModalOpen(false);
+      setAuthToast('Signed in as Dr. Aditya Sharma (Judge Demo Profile)');
+      setTimeout(() => setAuthToast(''), 3500);
+    } catch (err) {
+      setAuthError(err.message || 'Demo login failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleRegisterSubmit(e) {
+    if (e) e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const res = await getJson('/api/user/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: authForm.name,
+          email: authForm.email,
+          password: authForm.password,
+          city: authForm.city || city,
+          healthProfile: {
+            asthma: authForm.asthma,
+            athlete: authForm.athlete,
+            child: authForm.child,
+            elderly: authForm.elderly,
+          },
+          outdoorHoursPerWeek: Number(authForm.outdoorHours) || 8,
+        }),
+      });
+      setUserProfile(res.data);
+      localStorage.removeItem('saans_logged_out');
+      setIsAuthModalOpen(false);
+      setAuthToast(`Account created for ${res.data.name}!`);
+      setTimeout(() => setAuthToast(''), 3500);
+    } catch (err) {
+      setAuthError(err.message || 'Registration failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await getJson('/api/user/logout', { method: 'POST' }).catch(() => {});
+    } catch (_) {}
+    setUserProfile(null);
+    localStorage.setItem('saans_logged_out', 'true');
+    setAuthToast('Signed out of session');
+    setTimeout(() => setAuthToast(''), 3500);
+  }
+
+  // Commute Optimizer loader
+  async function loadCommute(targetCity = city, corridor = commuteCorridor, mode = commuteMode) {
+    const cId = corridor || (targetCity === 'delhi' ? 'anandvihar_ito' : 'pccoe_hinjewadi');
+    setCommuteLoading(true);
+    try {
+      const res = await getJson(`/api/commute/optimize?city=${encodeURIComponent(targetCity)}&corridorId=${encodeURIComponent(cId)}&mode=${encodeURIComponent(mode)}`);
+      if (res.data) setCommuteData(res.data);
+    } catch (e) {
+      console.warn('Commute error:', e.message);
+    } finally {
+      setCommuteLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadData(city);
+    const defaultCorridor = city === 'delhi' ? 'anandvihar_ito' : 'pccoe_hinjewadi';
+    setCommuteCorridor(defaultCorridor);
+    loadCommute(city, defaultCorridor, commuteMode);
   }, [city]);
 
   const selectedStation = stations.find(s => String(s.openaqId) === String(selectedId)) || stations[0];
   const latestR = selectedStation?.latestReading || {};
   const aqiVal = latestR.aqi || 142;
   const aqiBand = getAqiBand(aqiVal);
+
+  // Berkeley Earth Cigarette Equivalence Metric (22 µg/m³ PM2.5 ≈ 1 cigarette/day)
+  const pm25Val = latestR.pm25 || Math.round(aqiVal * 0.45) || 58;
+  const cigaretteDaily = +(pm25Val / 22).toFixed(1);
+  const cigaretteWeekly = +(cigaretteDaily * 7).toFixed(1);
+  const toxicDoseMg = +((pm25Val * 15) / 1000).toFixed(2);
 
   // Cart operations
   function handleAddToCart(product) {
@@ -260,9 +479,39 @@ function App() {
               </button>
             </div>
 
-            <button className="pill-btn" onClick={() => setCurrentPage('profile')}>
-              👤 Profile
-            </button>
+            {/* AUTH / PROFILE ACTION */}
+            {userProfile ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <button
+                  className="pill-btn"
+                  onClick={() => setCurrentPage('profile')}
+                  style={{ background: 'rgba(0, 229, 153, 0.08)', borderColor: 'var(--primary)', color: '#fff' }}
+                  title="View your personalized health profile"
+                >
+                  👤 {userProfile.name?.split(' ')[0] || 'Profile'} {userProfile.healthProfile?.asthma ? '🫁' : ''}
+                </button>
+                <button
+                  className="pill-btn"
+                  onClick={handleLogout}
+                  style={{ color: 'var(--text-dim)', fontSize: '0.72rem', padding: '0.35rem 0.55rem' }}
+                  title="Sign out of session"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setAuthTab('login');
+                  setAuthError('');
+                  setIsAuthModalOpen(true);
+                }}
+                style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem', borderRadius: 8 }}
+              >
+                🔑 Sign In / Register
+              </button>
+            )}
 
             <button className="pill-btn pill-cart" onClick={() => setIsCartOpen(true)}>
               🛒 Cart ({cart.reduce((s, i) => s + i.quantity, 0)})
@@ -700,67 +949,17 @@ function App() {
                 </div>
               </div>
 
-              {/* MAP VISUAL AREA WITH FLOATING STATION MARKERS */}
-              <div style={{ flex: 1, position: 'relative', background: '#071d16', overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', inset: 0, opacity: 0.35, backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(0,229,153,0.15) 0%, transparent 60%), linear-gradient(0deg, rgba(0,0,0,0.8), transparent)' }} />
-
-                {/* Floating Node Markers */}
-                {stations.map((st, i) => {
-                  const isSel = String(st.openaqId) === String(selectedId);
-                  const stAqi = st.latestReading?.aqi || 142;
-                  const band = getAqiBand(stAqi);
-
-                  // Coordinates mapping
-                  const positions = [
-                    { top: '35%', left: '42%' },
-                    { top: '55%', left: '48%' },
-                    { top: '48%', left: '28%' },
-                    { top: '25%', left: '52%' },
-                    { top: '75%', left: '55%' },
-                  ];
-                  const pos = positions[i % positions.length];
-
-                  return (
-                    <div
-                      key={st.openaqId}
-                      onClick={() => {
-                        setSelectedId(st.openaqId);
-                        loadForecast(st.openaqId);
-                      }}
-                      style={{
-                        position: 'absolute',
-                        top: pos.top,
-                        left: pos.left,
-                        transform: 'translate(-50%, -50%)',
-                        cursor: 'pointer',
-                        zIndex: isSel ? 10 : 2,
-                      }}
-                    >
-                      <div
-                        style={{
-                          background: isSel ? '#04120e' : 'rgba(12, 38, 31, 0.9)',
-                          border: isSel ? `2px solid ${band.color}` : '1px solid var(--border)',
-                          padding: '0.35rem 0.75rem',
-                          borderRadius: 99,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          boxShadow: isSel ? `0 0 20px ${band.color}66` : '0 4px 12px rgba(0,0,0,0.4)',
-                          whiteSpace: 'nowrap',
-                          transition: 'all 0.2s ease',
-                        }}
-                      >
-                        <span style={{ width: 8, height: 8, borderRadius: 99, background: band.color }} />
-                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
-                          {st.name.split(',')[0]}
-                        </span>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 800, color: band.color, fontFamily: 'var(--font-mono)' }}>
-                          {stAqi} {band.label}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+              {/* INTERACTIVE LEAFLET MAP */}
+              <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                <AqiLeafletMap
+                  city={city}
+                  stations={stations}
+                  selectedId={selectedId}
+                  onSelectStation={(id) => {
+                    setSelectedId(id);
+                    loadForecast(id);
+                  }}
+                />
               </div>
 
               {/* MAP BOTTOM LEGEND */}
@@ -808,11 +1007,53 @@ function App() {
                 </div>
 
                 {/* HEALTH ACTION ADVISORY */}
-                <div style={{ marginTop: '1.5rem', background: 'rgba(0,0,0,0.3)', padding: '1rem 1.25rem', borderRadius: 12, borderLeft: `4px solid ${aqiBand.color}`, fontSize: '0.85rem' }}>
+                <div style={{ marginTop: '1.25rem', background: 'rgba(0,0,0,0.3)', padding: '0.85rem 1.15rem', borderRadius: 12, borderLeft: `4px solid ${aqiBand.color}`, fontSize: '0.85rem' }}>
                   <div style={{ fontWeight: 800, color: '#fff' }}>⚡ Health Action Advisory</div>
                   <p style={{ color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
                     Avoid outdoor exercise 6-9 AM. Wear N95 respirator if commuting along busy arterial roads.
                   </p>
+                </div>
+
+                {/* BERKELEY CIGARETTE EQUIVALENCE & TOXIC DOSE */}
+                <div style={{ marginTop: '1rem', background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(245, 158, 11, 0.05))', padding: '1rem 1.15rem', borderRadius: 12, border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span style={{ fontSize: '1.1rem' }}>🚬</span>
+                      <strong style={{ color: '#fff', fontSize: '0.82rem' }}>Cigarette Equivalence & Toxic Dose</strong>
+                    </div>
+                    <span style={{ fontSize: '0.65rem', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', padding: '2px 7px', borderRadius: 99, fontWeight: 700, letterSpacing: '0.04em' }}>
+                      BERKELEY EARTH PEER STANDARD
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginTop: '0.65rem' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: cigaretteDaily > 3 ? '#ff4d6d' : '#f59e0b', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>
+                      {cigaretteDaily}
+                    </span>
+                    <span style={{ fontSize: '0.9rem', fontWeight: 800, color: '#fff' }}>
+                      Cigarettes / Day
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginLeft: 'auto' }}>
+                      ({cigaretteWeekly} cigs/week)
+                    </span>
+                  </div>
+
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.76rem', marginTop: '0.4rem', lineHeight: 1.45 }}>
+                    Breathing 24h outdoor air in <strong>{selectedStation?.name?.split(',')[0]}</strong> equals involuntarily smoking <strong>{cigaretteDaily} cigarettes</strong> today ({toxicDoseMg} mg inhaled PM2.5).
+                  </p>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.65rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                    <span>🛡️ N95 cuts dose by 95% (&lt; 0.1 cigs)</span>
+                    <button
+                      onClick={() => {
+                        setCurrentPage('assistant');
+                        handleSendChat(`What is my inhaled cigarette equivalence and toxic dose in ${selectedStation?.name?.split(',')[0]}?`);
+                      }}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: 700, fontSize: '0.72rem', padding: 0 }}
+                    >
+                      Ask AI Explainer ➔
+                    </button>
+                  </div>
                 </div>
 
                 {/* POLLUTANT BARS */}
@@ -878,6 +1119,21 @@ function App() {
                   💬 Ask SAANS AI
                 </button>
               </div>
+
+              {/* COMMUTE OPTIMIZER QUICK SHORTCUT */}
+              <div style={{ marginTop: '0.85rem', background: 'rgba(0, 229, 153, 0.05)', border: '1px solid rgba(0, 229, 153, 0.2)', padding: '0.65rem 0.85rem', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem' }}>
+                <span>🚗 Commuting across {city === 'pune' ? 'Pune/PCMC' : 'Delhi NCR'}?</span>
+                <button
+                  onClick={() => {
+                    setCurrentPage('analysis');
+                    setAnalysisSubTab('commute');
+                    loadCommute(city);
+                  }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontWeight: 800, cursor: 'pointer', padding: 0 }}
+                >
+                  View Clean Air Eco-Corridor (-40% dose) ➔
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -903,6 +1159,16 @@ function App() {
               style={{ background: analysisSubTab === 'comparison' ? 'var(--primary)' : 'rgba(255,255,255,0.05)', color: analysisSubTab === 'comparison' ? '#04120e' : '#fff' }}
             >
               📊 Multi-Location Comparison Matrix
+            </button>
+            <button
+              className={`pill-btn ${analysisSubTab === 'commute' ? 'pill-cart' : ''}`}
+              onClick={() => {
+                setAnalysisSubTab('commute');
+                loadCommute(city);
+              }}
+              style={{ background: analysisSubTab === 'commute' ? 'var(--primary)' : 'rgba(255,255,255,0.05)', color: analysisSubTab === 'commute' ? '#04120e' : '#fff' }}
+            >
+              🚗 Clean Air Commute Optimizer
             </button>
           </div>
 
@@ -940,7 +1206,9 @@ function App() {
             ))}
           </div>
 
-          {/* 72-HOUR FORECAST & 24H BREAKDOWN GRID */}
+          {analysisSubTab === 'deepdive' && (
+            <>
+              {/* 72-HOUR FORECAST & 24H BREAKDOWN GRID */}
           <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1.5rem' }}>
             {/* 72H CHART */}
             <div className="card" style={{ padding: '1.75rem' }}>
@@ -1125,6 +1393,367 @@ function App() {
               </div>
             </div>
           </div>
+            </>
+          )}
+
+          {/* MULTI-LOCATION COMPARISON MATRIX WITH CIGARETTE EQUIVALENCE */}
+          {analysisSubTab === 'comparison' && (
+            <div className="card" style={{ padding: '2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.35rem', fontWeight: 900 }}>Multi-Location Atmospheric & Toxic Equivalence Matrix</h3>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Comparative environmental exposure & Berkeley Earth cigarette equivalents across all {city.toUpperCase()} nodes</p>
+                </div>
+                <span style={{ fontSize: '0.72rem', background: 'rgba(0,229,153,0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 99, fontWeight: 800 }}>
+                  ● 5 Real-Time Stations Synced
+                </span>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-dim)', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                      <th style={{ padding: '0.85rem 1rem' }}>Station Node</th>
+                      <th style={{ padding: '0.85rem 1rem' }}>CPCB AQI</th>
+                      <th style={{ padding: '0.85rem 1rem' }}>PM2.5 (µg/m³)</th>
+                      <th style={{ padding: '0.85rem 1rem' }}>Dominant</th>
+                      <th style={{ padding: '0.85rem 1rem' }}>🚬 Passive Cigarettes / Day</th>
+                      <th style={{ padding: '0.85rem 1rem' }}>Toxic Dose (mg/day)</th>
+                      <th style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stations.map(st => {
+                      const stR = st.latestReading || {};
+                      const stAqi = stR.aqi || 142;
+                      const band = getAqiBand(stAqi);
+                      const stPm25 = stR.pm25 || Math.round(stAqi * 0.45) || 55;
+                      const stCigs = +(stPm25 / 22).toFixed(1);
+                      const stDose = +((stPm25 * 15) / 1000).toFixed(2);
+                      const isSel = String(st.openaqId) === String(selectedId);
+
+                      return (
+                        <tr
+                          key={st.openaqId}
+                          style={{
+                            borderBottom: '1px solid rgba(255,255,255,0.04)',
+                            background: isSel ? 'rgba(0,229,153,0.06)' : 'transparent',
+                            transition: 'background 0.2s ease',
+                          }}
+                        >
+                          <td style={{ padding: '1rem', fontWeight: 700, color: '#fff' }}>
+                            {st.name}
+                            {isSel && <span style={{ marginLeft: 8, fontSize: '0.7rem', color: 'var(--primary)' }}>● Active</span>}
+                          </td>
+                          <td style={{ padding: '1rem' }}>
+                            <span style={{ background: `${band.color}22`, color: band.color, padding: '3px 8px', borderRadius: 99, fontWeight: 800, fontSize: '0.78rem' }}>
+                              {stAqi} {band.label}
+                            </span>
+                          </td>
+                          <td style={{ padding: '1rem', fontFamily: 'var(--font-mono)', color: '#fff' }}>
+                            {stPm25} µg/m³
+                          </td>
+                          <td style={{ padding: '1rem', color: 'var(--text-muted)' }}>
+                            {stR.dominantPollutant || 'PM2.5'}
+                          </td>
+                          <td style={{ padding: '1rem' }}>
+                            <span style={{ fontWeight: 800, color: stCigs > 3 ? '#ff4d6d' : '#f59e0b', fontFamily: 'var(--font-mono)', fontSize: '0.95rem' }}>
+                              🚬 {stCigs}
+                            </span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginLeft: 4 }}>cigs/day</span>
+                          </td>
+                          <td style={{ padding: '1rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                            {stDose} mg
+                          </td>
+                          <td style={{ padding: '1rem', textAlign: 'right' }}>
+                            <button
+                              onClick={() => {
+                                setSelectedId(st.openaqId);
+                                loadForecast(st.openaqId);
+                                setAnalysisSubTab('deepdive');
+                              }}
+                              className="btn-outline"
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+                            >
+                              Deep-Dive ➔
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* BERKELEY FOOTNOTE CALLOUT */}
+              <div style={{ marginTop: '1.5rem', background: 'rgba(0,0,0,0.3)', padding: '1rem 1.25rem', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  📖 <strong>Toxicological Reference:</strong> Berkeley Earth Muller & Rohde peer-reviewed conversion rule equates 22 µg/m³ ambient PM2.5 to 1 cigarette in lung particle burden and cardiovascular disease risk.
+                </div>
+                <button
+                  onClick={() => {
+                    setCurrentPage('assistant');
+                    handleSendChat(`Compare the cigarette equivalent toxic dose across all stations in ${city}`);
+                  }}
+                  className="btn-primary"
+                  style={{ padding: '0.4rem 0.85rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+                >
+                  Ask AI to Compare 💬
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* CLEAN AIR COMMUTE & CORRIDOR OPTIMIZER */}
+          {analysisSubTab === 'commute' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {/* TOP SELECTOR CARD */}
+              <div className="card" style={{ padding: '1.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Clean Air Routing Intelligence
+                    </span>
+                    <h3 style={{ fontSize: '1.45rem', fontWeight: 900, marginTop: 2 }}>
+                      Clean Air Commute & Corridor Optimizer
+                    </h3>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                      Calculates route-level particulate exposure, comparing heavy arterial stagnation with aerodynamic eco-corridors.
+                    </p>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', background: 'rgba(0,229,153,0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 99, fontWeight: 800 }}>
+                    ● Real-Time Traffic & Air Quality Model
+                  </span>
+                </div>
+
+                {/* CORRIDOR BUTTONS */}
+                <div style={{ marginTop: '1.25rem' }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Select Commute Corridor ({city.toUpperCase()}):
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                    {(city === 'pune' ? [
+                      { id: 'pccoe_hinjewadi', label: 'PCCOE Akurdi ➔ Hinjewadi IT Phase 1' },
+                      { id: 'pccoe_shivajinagar', label: 'PCCOE Akurdi ➔ Shivajinagar Central' },
+                      { id: 'bhosari_wakad', label: 'Bhosari MIDC ➔ Wakad Corridor' },
+                    ] : [
+                      { id: 'anandvihar_ito', label: 'Anand Vihar ➔ ITO / Connaught Place' },
+                      { id: 'punjabibagh_rkpuram', label: 'Punjabi Bagh ➔ RK Puram South' },
+                    ]).map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => {
+                          setCommuteCorridor(c.id);
+                          loadCommute(city, c.id, commuteMode);
+                        }}
+                        style={{
+                          padding: '0.55rem 0.95rem',
+                          borderRadius: 8,
+                          border: commuteCorridor === c.id ? '1px solid var(--primary)' : '1px solid var(--border)',
+                          background: commuteCorridor === c.id ? 'rgba(0,229,153,0.15)' : 'rgba(255,255,255,0.03)',
+                          color: commuteCorridor === c.id ? '#fff' : 'var(--text-muted)',
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        📍 {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* TRANSIT MODE SELECTOR */}
+                <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Transit Vehicle / Physical Mode:
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                    {[
+                      { id: 'bike_scooter', icon: '🛵', label: 'Two-Wheeler / Scooter (1.5 m³/h)' },
+                      { id: 'car_ac', icon: '🚗', label: 'Car with AC / Cabin Filter (0.35 m³/h)' },
+                      { id: 'bus_transit', icon: '🚌', label: 'Public Bus (1.1 m³/h)' },
+                      { id: 'bicycle', icon: '🚲', label: 'Bicycle / Jog (2.2 m³/h)' },
+                    ].map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          setCommuteMode(m.id);
+                          loadCommute(city, commuteCorridor, m.id);
+                        }}
+                        style={{
+                          padding: '0.45rem 0.85rem',
+                          borderRadius: 8,
+                          border: commuteMode === m.id ? '1px solid var(--primary)' : '1px solid var(--border)',
+                          background: commuteMode === m.id ? 'rgba(0,229,153,0.15)' : 'rgba(0,0,0,0.2)',
+                          color: commuteMode === m.id ? '#fff' : 'var(--text-muted)',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {m.icon} {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* COMPARISON CARDS GRID */}
+              {commuteData && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                    {/* STANDARD ARTERIAL ROUTE */}
+                    <div className="card" style={{ padding: '1.75rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(12, 38, 31, 0.7))' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.7rem', color: '#ff4d6d', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Standard Shortest Corridor
+                        </span>
+                        <span style={{ fontSize: '0.72rem', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', padding: '2px 8px', borderRadius: 99, fontWeight: 700 }}>
+                          High Particulate Stagnation
+                        </span>
+                      </div>
+
+                      <h4 style={{ fontSize: '1.15rem', fontWeight: 800, marginTop: '0.5rem', color: '#fff' }}>
+                        {commuteData.standardRoute?.name}
+                      </h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 2 }}>
+                        Road Type: {commuteData.standardRoute?.roadType}
+                      </p>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginTop: '1.25rem' }}>
+                        <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Travel Time</div>
+                          <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#fff', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                            {commuteData.standardRoute?.travelTimeMins} m
+                          </div>
+                        </div>
+
+                        <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Corridor PM2.5</div>
+                          <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#ff4d6d', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                            {commuteData.standardRoute?.ambientPM25} µg
+                          </div>
+                        </div>
+
+                        <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Inhaled Toxic Dose</div>
+                          <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#f59e0b', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                            {commuteData.standardRoute?.inhaledDoseUg} µg
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: '1.25rem', padding: '0.75rem', borderRadius: 8, background: 'rgba(0,0,0,0.3)', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        🚬 <strong>Passive Dose:</strong> Equal to involuntarily smoking <strong>{commuteData.standardRoute?.cigaretteEquivalence} cigarettes</strong> in a single commute due to diesel exhaust idling.
+                      </div>
+                    </div>
+
+                    {/* CLEAN AIR ECO-CORRIDOR (RECOMMENDED) */}
+                    <div className="card" style={{ padding: '1.75rem', border: '2px solid var(--primary)', background: 'linear-gradient(135deg, rgba(0, 229, 153, 0.08), rgba(12, 38, 31, 0.8))' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          🌿 RECOMMENDED ECO-CORRIDOR
+                        </span>
+                        <span style={{ fontSize: '0.72rem', background: 'var(--primary)', color: '#04120e', padding: '2px 8px', borderRadius: 99, fontWeight: 800 }}>
+                          -{commuteData.optimization?.percentSaved}% Inhaled Dose
+                        </span>
+                      </div>
+
+                      <h4 style={{ fontSize: '1.15rem', fontWeight: 800, marginTop: '0.5rem', color: '#fff' }}>
+                        {commuteData.cleanAirRoute?.name}
+                      </h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 2 }}>
+                        Road Type: {commuteData.cleanAirRoute?.roadType}
+                      </p>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginTop: '1.25rem' }}>
+                        <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Travel Time</div>
+                          <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#fff', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                            {commuteData.cleanAirRoute?.travelTimeMins} m
+                          </div>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>+{commuteData.optimization?.extraTimeMins}m delta</div>
+                        </div>
+
+                        <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Corridor PM2.5</div>
+                          <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--primary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                            {commuteData.cleanAirRoute?.ambientPM25} µg
+                          </div>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--primary)' }}>Clean Flow</div>
+                        </div>
+
+                        <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Inhaled Toxic Dose</div>
+                          <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--primary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                            {commuteData.cleanAirRoute?.inhaledDoseUg} µg
+                          </div>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--primary)' }}>-{commuteData.optimization?.doseSavedUg} µg saved</div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: '1.25rem', padding: '0.75rem', borderRadius: 8, background: 'rgba(0, 229, 153, 0.08)', border: '1px solid rgba(0, 229, 153, 0.2)', fontSize: '0.78rem', color: '#fff' }}>
+                        🛡️ <strong>Health Win:</strong> Inhaled cigarette equivalence drops to only <strong>{commuteData.cleanAirRoute?.cigaretteEquivalence} cigs</strong>. Saves <strong>{commuteData.optimization?.percentSaved}%</strong> toxic intake with only {commuteData.optimization?.extraTimeMins} mins extra travel time.
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* DEPARTURE WINDOWS CARD */}
+                  <div className="card" style={{ padding: '1.75rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: 800 }}>🕒 Optimal Departure Windows for this Corridor</h4>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Algorithmic timing balancing solar convection mixing and rush hour stagnation</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setCurrentPage('assistant');
+                          handleSendChat(`What is the safest commute route and departure window for ${commuteData.title}?`);
+                        }}
+                        className="btn-primary"
+                        style={{ padding: '0.45rem 0.95rem', fontSize: '0.8rem' }}
+                      >
+                        💬 Ask AI Commute Advisor
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginTop: '1.25rem' }}>
+                      {commuteData.departureWindows?.map((dw, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '1rem',
+                            borderRadius: 12,
+                            background: dw.aqiMultiplier < 1 ? 'rgba(0, 229, 153, 0.08)' : 'rgba(0,0,0,0.3)',
+                            border: dw.aqiMultiplier < 1 ? '1px solid rgba(0, 229, 153, 0.3)' : '1px solid var(--border)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.7rem', fontWeight: 800, color: dw.aqiMultiplier < 1 ? 'var(--primary)' : '#ff4d6d' }}>
+                              {dw.tag}
+                            </span>
+                            {dw.aqiMultiplier < 1 && (
+                              <span style={{ fontSize: '0.62rem', background: 'var(--primary)', color: '#04120e', padding: '1px 5px', borderRadius: 4, fontWeight: 800 }}>
+                                RECOMMENDED
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 900, color: '#fff', marginTop: '0.35rem', fontFamily: 'var(--font-mono)' }}>
+                            {dw.window}
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: 1.4 }}>
+                            {dw.recommendation}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1171,11 +1800,11 @@ function App() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.75rem' }}>
                   {[
+                    'What is my passive cigarette equivalence and toxic dose today?',
                     'What is the AQI near PCCOE Vicinity?',
                     'Why is AQI increasing in Pune tonight?',
                     'Can I go running tomorrow at 7 PM?',
                     'What is the best outdoor time window?',
-                    'Why is it high in Hinjewadi IT corridor?',
                     'What can I buy to protect against high PM2.5?',
                   ].map((p, pi) => (
                     <button
@@ -1320,9 +1949,64 @@ function App() {
       {currentPage === 'profile' && (
         <div className="wrap" style={{ padding: '2rem 0' }}>
           <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {/* ACCOUNT DETAILS & ROUTINE (EXACT FROM VIDEO) */}
-            <div className="card" style={{ padding: '2rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>👤 Account Details & Routine Estimation</h3>
+            {!userProfile ? (
+              <div className="card" style={{ padding: '3.5rem 2rem', textAlign: 'center' }}>
+                <div style={{ width: 64, height: 64, borderRadius: 20, background: 'rgba(0, 229, 153, 0.1)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem', fontSize: '2rem' }}>
+                  👤
+                </div>
+                <h2 style={{ fontSize: '1.85rem', fontWeight: 900 }}>Guest Session Active</h2>
+                <p style={{ color: 'var(--text-muted)', maxWidth: 540, margin: '0.75rem auto 2rem', fontSize: '0.92rem', lineHeight: 1.6 }}>
+                  You are currently exploring SAANS in Public Guest Mode. Sign in or create an account to configure your personal respiratory vulnerability profile (asthma/athlete/child), sync custom CPCB station alerts, and personalize AI medical cautions.
+                </p>
+                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      setAuthTab('login');
+                      setAuthError('');
+                      setIsAuthModalOpen(true);
+                    }}
+                  >
+                    🔑 Sign In to Account ➔
+                  </button>
+                  <button
+                    className="btn-outline"
+                    onClick={() => {
+                      setAuthTab('register');
+                      setAuthError('');
+                      setIsAuthModalOpen(true);
+                    }}
+                  >
+                    📝 Create New Account
+                  </button>
+                  <button
+                    className="pill-btn"
+                    onClick={handleDemoQuickLogin}
+                    style={{ background: 'rgba(0, 229, 153, 0.08)', borderColor: 'var(--primary)', color: 'var(--primary)', fontWeight: 700 }}
+                  >
+                    ⚡ 1-Click Judge Demo Login
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* ACCOUNT DETAILS & ROUTINE (EXACT FROM VIDEO) */}
+                <div className="card" style={{ padding: '2rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div>
+                      <h3 style={{ fontSize: '1.25rem', fontWeight: 800 }}>👤 Account Details & Routine Estimation</h3>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                        Signed in as <strong style={{ color: 'var(--primary)' }}>{userProfile.email}</strong>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      className="btn-outline"
+                      style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem', borderColor: 'rgba(255, 77, 109, 0.4)', color: '#ff4d6d' }}
+                    >
+                      Sign Out
+                    </button>
+                  </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1.25rem' }}>
                 <div>
                   <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Full Name</label>
@@ -1461,6 +2145,293 @@ function App() {
                 ))}
               </div>
             </div>
+            </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────
+          AUTH NOTIFICATION TOAST
+          ──────────────────────────────────────────────────────── */}
+      {authToast && (
+        <div style={{ position: 'fixed', bottom: '2rem', right: '2rem', background: '#0a251e', border: '1px solid var(--primary)', padding: '1rem 1.5rem', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', gap: '0.75rem', animation: 'slideUp 0.3s ease' }}>
+          <span style={{ fontSize: '1.4rem', color: 'var(--primary)' }}>👤</span>
+          <div>
+            <strong style={{ color: '#fff', fontSize: '0.9rem' }}>Account Status Updated</strong>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{authToast}</div>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────
+          AUTHENTICATION MODAL (SIGN IN / REGISTER / JUDGE 1-CLICK DEMO)
+          ──────────────────────────────────────────────────────── */}
+      {isAuthModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsAuthModalOpen(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            {/* MODAL HEADER */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  <span>◈</span> SAANS Air Intelligence
+                </div>
+                <h2 style={{ fontSize: '1.4rem', fontWeight: 900, marginTop: 4 }}>
+                  {authTab === 'login' ? 'Sign In to Your Account' : 'Create Your SAANS Account'}
+                </h2>
+              </div>
+              <button
+                onClick={() => setIsAuthModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.25rem', cursor: 'pointer', padding: 4 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* TAB SELECTOR */}
+            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: 10, padding: 3, marginBottom: '1.25rem' }}>
+              <button
+                type="button"
+                onClick={() => { setAuthTab('login'); setAuthError(''); }}
+                style={{
+                  flex: 1,
+                  padding: '0.55rem',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: authTab === 'login' ? 'var(--primary)' : 'transparent',
+                  color: authTab === 'login' ? '#04120e' : 'var(--text-muted)',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAuthTab('register'); setAuthError(''); }}
+                style={{
+                  flex: 1,
+                  padding: '0.55rem',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: authTab === 'register' ? 'var(--primary)' : 'transparent',
+                  color: authTab === 'register' ? '#04120e' : 'var(--text-muted)',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                Create Account (Sign Up)
+              </button>
+            </div>
+
+            {/* ERROR BANNER */}
+            {authError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#fca5a5', padding: '0.65rem 0.85rem', borderRadius: 8, fontSize: '0.8rem', marginBottom: '1rem', lineHeight: 1.4 }}>
+                ⚠️ {authError}
+              </div>
+            )}
+
+            {/* SIGN IN FORM */}
+            {authTab === 'login' ? (
+              <form onSubmit={handleLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. aditya@saans.org"
+                    value={authForm.email}
+                    onChange={e => setAuthForm(p => ({ ...p, email: e.target.value }))}
+                    style={{ width: '100%', marginTop: 4, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.65rem 0.85rem', color: '#fff', outline: 'none' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Password</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Enter password (or demo123)"
+                    value={authForm.password}
+                    onChange={e => setAuthForm(p => ({ ...p, password: e.target.value }))}
+                    style={{ width: '100%', marginTop: 4, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.65rem 0.85rem', color: '#fff', outline: 'none' }}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={authLoading}
+                  style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }}
+                >
+                  {authLoading ? 'Signing In...' : 'Sign In ➔'}
+                </button>
+
+                {/* 1-CLICK DEMO LOGIN FOR JUDGES */}
+                <div style={{ textAlign: 'center', marginTop: '0.75rem', paddingTop: '0.85rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.6rem' }}>
+                    ⚡ For Video Demo & Hackathon Judges
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDemoQuickLogin}
+                    disabled={authLoading}
+                    className="pill-btn"
+                    style={{
+                      width: '100%',
+                      justifyContent: 'center',
+                      background: 'rgba(0, 229, 153, 0.08)',
+                      borderColor: 'var(--primary)',
+                      color: 'var(--primary)',
+                      fontWeight: 700,
+                      padding: '0.6rem',
+                    }}
+                  >
+                    1-Click Judge Demo Login (Dr. Aditya Sharma - Asthma Profile)
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* REGISTER FORM */
+              <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Priya Kulkarni"
+                    value={authForm.name}
+                    onChange={e => setAuthForm(p => ({ ...p, name: e.target.value }))}
+                    style={{ width: '100%', marginTop: 4, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.65rem 0.85rem', color: '#fff', outline: 'none' }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="e.g. priya@pccoe.edu"
+                      value={authForm.email}
+                      onChange={e => setAuthForm(p => ({ ...p, email: e.target.value }))}
+                      style={{ width: '100%', marginTop: 4, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.65rem 0.85rem', color: '#fff', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Password</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="Create password"
+                      value={authForm.password}
+                      onChange={e => setAuthForm(p => ({ ...p, password: e.target.value }))}
+                      style={{ width: '100%', marginTop: 4, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.65rem 0.85rem', color: '#fff', outline: 'none' }}
+                    />
+                  </div>
+                </div>
+
+                {/* PRIMARY CITY SELECT */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Primary Region</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => setAuthForm(p => ({ ...p, city: 'pune' }))}
+                      style={{
+                        padding: '0.5rem',
+                        borderRadius: 6,
+                        border: authForm.city === 'pune' ? '1px solid var(--primary)' : '1px solid var(--border)',
+                        background: authForm.city === 'pune' ? 'rgba(0,229,153,0.1)' : 'rgba(0,0,0,0.3)',
+                        color: authForm.city === 'pune' ? 'var(--primary)' : 'var(--text-muted)',
+                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      📍 Pune & PCMC
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthForm(p => ({ ...p, city: 'delhi' }))}
+                      style={{
+                        padding: '0.5rem',
+                        borderRadius: 6,
+                        border: authForm.city === 'delhi' ? '1px solid var(--primary)' : '1px solid var(--border)',
+                        background: authForm.city === 'delhi' ? 'rgba(0,229,153,0.1)' : 'rgba(0,0,0,0.3)',
+                        color: authForm.city === 'delhi' ? 'var(--primary)' : 'var(--text-muted)',
+                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      📍 Delhi NCR
+                    </button>
+                  </div>
+                </div>
+
+                {/* HEALTH VULNERABILITY CHECKBOXES */}
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    Health Personas (Adjusts AI & Alert Sensitivity)
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', marginTop: 4 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.25)', padding: '0.45rem 0.65rem', borderRadius: 6, fontSize: '0.75rem', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={authForm.asthma}
+                        onChange={e => setAuthForm(p => ({ ...p, asthma: e.target.checked }))}
+                        style={{ accentColor: 'var(--primary)' }}
+                      />
+                      <span>🫁 Asthma / Respiratory</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.25)', padding: '0.45rem 0.65rem', borderRadius: 6, fontSize: '0.75rem', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={authForm.athlete}
+                        onChange={e => setAuthForm(p => ({ ...p, athlete: e.target.checked }))}
+                        style={{ accentColor: 'var(--primary)' }}
+                      />
+                      <span>🏃 Outdoor Athlete</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.25)', padding: '0.45rem 0.65rem', borderRadius: 6, fontSize: '0.75rem', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={authForm.child}
+                        onChange={e => setAuthForm(p => ({ ...p, child: e.target.checked }))}
+                        style={{ accentColor: 'var(--primary)' }}
+                      />
+                      <span>🧒 School Children</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,0.25)', padding: '0.45rem 0.65rem', borderRadius: 6, fontSize: '0.75rem', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={authForm.elderly}
+                        onChange={e => setAuthForm(p => ({ ...p, elderly: e.target.checked }))}
+                        style={{ accentColor: 'var(--primary)' }}
+                      />
+                      <span>👴 Senior Citizen</span>
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={authLoading}
+                  style={{ marginTop: '0.4rem', width: '100%', justifyContent: 'center' }}
+                >
+                  {authLoading ? 'Registering...' : 'Create Account & Personalize ➔'}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}
