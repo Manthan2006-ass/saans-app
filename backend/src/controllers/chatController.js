@@ -2,191 +2,113 @@ import mongoose from 'mongoose';
 import { Conversation } from '../models/Conversation.js';
 import { User } from '../models/User.js';
 import { Station } from '../models/Station.js';
-import { Reading } from '../models/Reading.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
-import { DEMO_STATIONS, generateDemoReadings } from '../services/demoData.js';
+import { executeAssistantQuery } from '../services/assistantEngine.js';
 
 /**
- * Intelligent Rule & Context-Based AI Assistant
- * Provides health-personalized air quality guidance with tool calling
+ * Handle AI Assistant chat messages with 11 intents, contextual location resolution,
+ * tool calling, and follow-up memory.
  */
 export const handleChatMessage = asyncHandler(async (req, res) => {
   const { message, stationId, city = 'pune' } = req.body;
 
-  if (!message || !message.trim()) {
-    return res.status(400).json({ error: 'Message content is required' });
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({
+      statusCode: 400,
+      success: false,
+      message: 'Message content is required and cannot be empty.',
+    });
   }
 
-  // 1. Fetch User Context
+  // 1. Fetch User Profile Context
   let user = null;
   if (mongoose.connection.readyState === 1) {
-    user = await User.findOne();
+    try {
+      user = await User.findOne().lean();
+    } catch (e) {
+      console.warn('[ChatController] User fetch error:', e.message);
+    }
   }
-  const health = user?.healthProfile || { asthma: true, athlete: false, child: false, elderly: false };
 
-  // 2. Fetch Station & Current AQI Context
-  let station = null;
-  let latestReading = null;
+  // 2. Fetch Recent Conversation Context for Follow-ups
+  let conversationHistory = [];
+  let convDoc = null;
 
   if (mongoose.connection.readyState === 1) {
-    station = await Station.findOne({
-      $or: [
-        { openaqId: Number(stationId) || null },
-        { _id: mongoose.isValidObjectId(stationId) ? stationId : null },
-        { city: city.toLowerCase() },
-      ],
-    });
-    if (station) {
-      latestReading = await Reading.findOne({
-        $or: [{ station: station._id }, { stationId: station.openaqId }],
-      }).sort({ ts: -1 });
+    try {
+      convDoc = await Conversation.findOne().sort({ updatedAt: -1 });
+      if (convDoc && Array.isArray(convDoc.messages)) {
+        conversationHistory = convDoc.messages.slice(-6); // last 6 turns
+      }
+    } catch (e) {
+      console.warn('[ChatController] Conversation history fetch error:', e.message);
     }
   }
 
-  if (!station) {
-    station = DEMO_STATIONS.find(s => s.city === city.toLowerCase()) || DEMO_STATIONS[0];
-    const demoR = generateDemoReadings(station.openaqId);
-    latestReading = demoR[demoR.length - 1];
-  }
-
-  const currentAqi = latestReading?.aqi || 148;
-  const pm25 = latestReading?.pm25 || 62;
-  const toolsUsed = [];
-
-  // 3. AI Reasoning & Smart Tool Calling Logic
-  const msgLower = message.toLowerCase();
-  let reply = '';
-
-  // Tool 1: Cigarette Equivalence & Toxic Dose Calculator
-  if (msgLower.includes('cigarette') || msgLower.includes('smoke') || msgLower.includes('smoking') || msgLower.includes('dose') || msgLower.includes('lungs') || msgLower.includes('inhale')) {
-    const cigEquiv = +(pm25 / 22).toFixed(1);
-    const weeklyCig = +(cigEquiv * 7).toFixed(1);
-    const inhaledMg = +((pm25 * 15) / 1000).toFixed(2);
-
-    toolsUsed.push({
-      toolName: 'berkeley_cigarette_dose_calculator',
-      queryParameters: { pm25, standard: 'Berkeley Earth (Muller & Rohde)' },
-      outputSummary: `Daily: ${cigEquiv} cigarettes/day, Weekly: ${weeklyCig} cigarettes, Inhaled PM2.5: ${inhaledMg} mg/day.`,
+  // 3. Execute Master Assistant Query Pipeline
+  let assistantResult;
+  try {
+    assistantResult = await executeAssistantQuery({
+      message: message.trim(),
+      conversationHistory,
+      currentCity: city,
+      currentStationId: stationId,
+      userProfile: user,
     });
-
-    reply = `🚬 **Toxicological Cigarette Equivalence Report** for **${station.name}**:\n\n` +
-      `According to the peer-reviewed **Berkeley Earth Toxicological Equivalence Formula** (where 22 µg/m³ of PM2.5 delivers particulate lung toxicity equal to 1 cigarette):\n\n` +
-      `• **Daily Passive Inhalation**: Breathing ambient air here today is equivalent to smoking **${cigEquiv} cigarettes/day**.\n` +
-      `• **Weekly Cumulative Dose**: **${weeklyCig} cigarettes/week** if unmitigated.\n` +
-      `• **Inhaled Fine Particulate Mass**: An average adult breathing ~15 m³ of air will inhale **${inhaledMg} mg** of micro-particulates straight into the alveolar tissue today.\n\n` +
-      `💡 **Protection Tip**: Wearing a fitted **NIOSH-approved N95 mask** reduces your inhaled particulate dose by **95%**, dropping your effective exposure to less than 0.1 cigarettes.`;
+  } catch (err) {
+    console.error('[ChatController Engine Error]:', err);
+    // Never expose raw stack traces to the user
+    assistantResult = {
+      content: `I encountered an unexpected issue while retrieving atmospheric models for your query. Please try asking again or select a specific station from the list.`,
+      toolsUsed: [{
+        toolName: 'error_recovery_fallback',
+        queryParameters: { error: err.message },
+        outputSummary: 'Safely captured exception without crashing the assistant.',
+      }],
+      station: 'Network Node',
+      location: city === 'delhi' ? 'Delhi NCR' : 'Pune Metropolitan',
+      aqi: 142,
+      intent: 'fallback_recovery',
+      showProductCards: false,
+      recommendedProducts: [],
+    };
   }
 
-  // Tool 2: Clean Air Commute & Eco-Corridor Optimizer
-  else if (msgLower.includes('commute') || msgLower.includes('route') || msgLower.includes('hinjewadi') || msgLower.includes('office') || msgLower.includes('traffic') || msgLower.includes('bypass') || msgLower.includes('safest way')) {
-    toolsUsed.push({
-      toolName: 'commute_corridor_optimizer',
-      queryParameters: { origin: 'PCCOE Akurdi', destination: 'Hinjewadi IT Corridor', city: station.city },
-      outputSummary: 'Clean Air Eco-Corridor via Ravet-Punawale reduces inhaled PM2.5 by 40% with +4 mins travel delta.',
-    });
-
-    reply = `🚗 **Clean Air Commute Optimization Report** (${station.city.toUpperCase()} Regional Grid):\n\n` +
-      `We evaluated your commute between **PCCOE Campus / Nigdi** and **Hinjewadi IT Park / Urban Hubs**:\n\n` +
-      `• **Arterial Highway Corridor (Old Highway / Wakad Bridge)**: Heavy diesel truck stagnation. Ambient PM2.5 is **~101 µg/m³** (Inhaled: 0.91 mg / 0.7 cigarettes on commute).\n` +
-      `• **Clean Air Eco-Corridor (Ravet-Punawale Green Buffer Bypass)**: Aerodynamic dispersion route. Ambient PM2.5 drops to **~54 µg/m³**.\n\n` +
-      `🎯 **Result**: Taking the Eco-Corridor eliminates **40% of inhaled toxic particulate load** with only **4 minutes extra travel time**!\n` +
-      `🕒 **Best Commute Departure Window**: **11:30 AM to 2:30 PM** (Solar boundary layer thermal mixing minimizes ground-level vehicular soot).`;
-  }
-
-  // Tool 3: Diurnal Outdoor Activity & Window Planner Tool
-  else if (msgLower.includes('go out') || msgLower.includes('jog') || msgLower.includes('run') || msgLower.includes('travel') || msgLower.includes('walk') || msgLower.includes('best time')) {
-    toolsUsed.push({
-      toolName: 'diurnal_exposure_optimizer',
-      queryParameters: { station: station.name, currentAqi },
-      outputSummary: 'Recommended window: 2:00 PM - 4:30 PM (afternoon thermal boundary layer dispersion).',
-    });
-
-    const isHigh = currentAqi > 150;
-    reply = `Currently, the air quality at **${station.name}** is **AQI ${currentAqi} (PM2.5: ${pm25} µg/m³)**. \n\n`;
-
-    if (health.asthma) {
-      reply += `⚠️ **Personalized Health Alert (Asthma)**: With your respiratory profile, avoid strenuous outdoor cardio during peak smog hours (7:00 AM - 10:00 AM and after 8:00 PM). \n\n`;
-    }
-
-    if (isHigh) {
-      reply += `💡 **Optimal Recommendation**: Postpone heavy outdoor exertion. If you must commute, the safest window is **2:00 PM to 4:30 PM**, when thermal convection lifts ground-level pollutants. Please wear an N95 respirator.`;
-    } else {
-      reply += `✅ **Recommendation**: Moderate outdoor activities are acceptable today. Sensitive groups should monitor for coughing or shortness of breath.`;
-    }
-  }
-
-  // Tool 2: Atmospheric Explainability & SHAP Driver Tool
-  else if (msgLower.includes('why') || msgLower.includes('reason') || msgLower.includes('high') || msgLower.includes('cause') || msgLower.includes('shap')) {
-    toolsUsed.push({
-      toolName: 'shap_atmospheric_explainer',
-      queryParameters: { station: station.name, city: station.city },
-      outputSummary: 'Top positive driver: Boundary layer compression (+22 AQI); Top negative driver: Surface wind dilution (-24 AQI).',
-    });
-
-    reply = `Based on our **LightGBM ML atmospheric attribution models** for ${station.name}:\n\n` +
-      `1. **Boundary Layer Descent (+22 AQI impact)**: Nocturnal radiative cooling has lowered the mixing height below 250m, trapping PM2.5 emissions near the ground.\n` +
-      `2. **Vehicular NO₂ Influx (+16 AQI impact)**: Rush hour traffic along arterial corridors accelerates secondary nitrate particle formation.\n` +
-      `3. **Wind Ventilation (-24 AQI mitigating factor)**: Afternoon wind gusts above 11 km/h provide horizontal dilution, preventing severe stagnation.`;
-  }
-
-  // Tool 3: Protection & Mask Recommendation Tool
-  else if (msgLower.includes('mask') || msgLower.includes('purifier') || msgLower.includes('protect') || msgLower.includes('filter') || msgLower.includes('buy')) {
-    toolsUsed.push({
-      toolName: 'protection_product_matcher',
-      queryParameters: { currentAqi, healthProfile: health },
-      outputSummary: 'Matched certified N95 respirator and True-HEPA H13 room purifier.',
-    });
-
-    reply = `At the current **AQI of ${currentAqi}** in ${station.city.toUpperCase()}:\n\n` +
-      `• **Respirator**: Standard surgical or cloth masks filter less than 30% of sub-micron PM2.5. We recommend a **Certified NIOSH N95 respirator** with a tight seal.\n` +
-      `• **Indoor Air**: Maintain indoor PM2.5 < 15 µg/m³ using a **True-HEPA H13 Air Purifier**. Keep doors and windows shut during morning inversion hours.\n\n` +
-      `You can find certified masks and purifiers directly in our **Protection Store** tab with instant delivery to PCCOE and Pune!`;
-  }
-
-  // Tool 4: General Consultation
-  else {
-    toolsUsed.push({
-      toolName: 'air_quality_telemetry_lookup',
-      queryParameters: { station: station.name, aqi: currentAqi },
-      outputSummary: `Station: ${station.name}, Dominant Pollutant: ${latestReading?.dominantPollutant || 'PM2.5'}.`,
-    });
-
-    reply = `Hello! I'm your **SAANS AI Health & Air Quality Assistant**.\n\n` +
-      `Monitoring live data for **${station.name}**: Current AQI is **${currentAqi}** (${currentAqi > 200 ? 'Poor/Hazardous' : currentAqi > 100 ? 'Moderate' : 'Good'}). \n\n` +
-      `How can I assist you today? You can ask:\n` +
-      `• *"Should I go for an evening run today?"*\n` +
-      `• *"Why is the AQI spiking tonight?"*\n` +
-      `• *"What mask or purifier is best for my asthma?"*`;
-  }
-
-  // 4. Record to Conversation model if DB connected
+  // 4. Save to Conversation Collection in MongoDB
   if (mongoose.connection.readyState === 1) {
-    let conv = await Conversation.findOne();
-    if (!conv) {
-      conv = await Conversation.create({
-        user: user?._id || null,
-        station: station._id || null,
-        title: `Consultation - ${station.city}`,
-        messages: [],
+    try {
+      if (!convDoc) {
+        convDoc = await Conversation.create({
+          user: user?._id || null,
+          title: `Consultation - ${city}`,
+          messages: [],
+        });
+      }
+
+      convDoc.messages.push({
+        role: 'user',
+        content: message.trim(),
+        toolsUsed: [],
+        createdAt: new Date(),
       });
+
+      convDoc.messages.push({
+        role: 'assistant',
+        content: assistantResult.content,
+        toolsUsed: assistantResult.toolsUsed || [],
+        createdAt: new Date(),
+      });
+
+      // Keep recent 50 messages
+      if (convDoc.messages.length > 50) {
+        convDoc.messages = convDoc.messages.slice(-50);
+      }
+
+      await convDoc.save();
+    } catch (dbErr) {
+      console.warn('[ChatController] Failed to persist conversation:', dbErr.message);
     }
-
-    conv.messages.push({
-      role: 'user',
-      content: message,
-      toolsUsed: [],
-      createdAt: new Date(),
-    });
-
-    conv.messages.push({
-      role: 'assistant',
-      content: reply,
-      toolsUsed,
-      createdAt: new Date(),
-    });
-
-    await conv.save();
   }
 
   return res.status(200).json(
@@ -194,10 +116,14 @@ export const handleChatMessage = asyncHandler(async (req, res) => {
       200,
       {
         role: 'assistant',
-        content: reply,
-        toolsUsed,
-        station: station.name,
-        aqi: currentAqi,
+        content: assistantResult.content,
+        toolsUsed: assistantResult.toolsUsed || [],
+        station: assistantResult.station,
+        location: assistantResult.location,
+        aqi: assistantResult.aqi,
+        intent: assistantResult.intent,
+        showProductCards: assistantResult.showProductCards,
+        recommendedProducts: assistantResult.recommendedProducts || [],
       },
       'Assistant response generated'
     )
@@ -209,9 +135,12 @@ export const handleChatMessage = asyncHandler(async (req, res) => {
  */
 export const getChatHistory = asyncHandler(async (_req, res) => {
   if (mongoose.connection.readyState === 1) {
-    const conv = await Conversation.findOne().populate('station');
-    return res.status(200).json(new ApiResponse(200, conv?.messages || [], 'Chat history loaded'));
+    try {
+      const conv = await Conversation.findOne().sort({ updatedAt: -1 }).lean();
+      return res.status(200).json(new ApiResponse(200, conv?.messages || [], 'Chat history loaded'));
+    } catch (e) {
+      console.warn('[ChatController] getChatHistory error:', e.message);
+    }
   }
   return res.status(200).json(new ApiResponse(200, [], 'Chat history empty in offline mode'));
 });
-

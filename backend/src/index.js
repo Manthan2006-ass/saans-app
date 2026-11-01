@@ -13,6 +13,7 @@ import { User } from './models/User.js';
 import { Alert } from './models/Alert.js';
 import { ingestStationDualSource } from './services/liveIngest.js';
 import { DEMO_STATIONS, generateDemoReadings } from './services/demoData.js';
+import { seedAdminUser } from './controllers/adminController.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -243,6 +244,7 @@ connectDB(mongoUri)
     await Reading.syncIndexes().catch(() => {});
     await Station.syncIndexes().catch(() => {});
     await seedStations().catch(err => console.warn('Station seed warning:', err.message));
+    await seedAdminUser().catch(err => console.warn('Admin seed warning:', err.message));
 
     app.listen(port, () => {
       console.log(`\n╔═══════════════════════════════════════════════════════╗`);

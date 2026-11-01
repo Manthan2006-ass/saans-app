@@ -19,6 +19,11 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'admin'],
     default: 'user',
   },
+  status: {
+    type: String,
+    enum: ['active', 'inactive', 'suspended'],
+    default: 'active',
+  },
   healthProfile: {
     asthma: { type: Boolean, default: false },
     athlete: { type: Boolean, default: false },

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
+import AdminPortal from './components/AdminPortal.jsx';
 
 const fmt = n => (n == null || n === '' || !Number.isFinite(Number(n)) ? '—' : Math.round(Number(n)));
 
@@ -32,9 +33,34 @@ function MapRecenter({ city }) {
   return null;
 }
 
-/** Interactive AQI Map with dark tiles and glowing station markers */
-function AqiLeafletMap({ city, stations, selectedId, onSelectStation }) {
+const MAP_TILE_PROVIDERS = {
+  satellite: {
+    name: 'Satellite',
+    url: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    maxZoom: 20,
+    attribution: '&copy; Google Maps',
+  },
+  street: {
+    name: 'Street',
+    url: 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    maxZoom: 20,
+    attribution: '&copy; Google Maps',
+  },
+  terrain: {
+    name: 'Terrain',
+    url: 'https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    maxZoom: 20,
+    attribution: '&copy; Google Maps',
+  },
+};
+
+/** Interactive AQI Map with Google Satellite / Street / Terrain tiles and station markers */
+function AqiLeafletMap({ city, stations, selectedId, onSelectStation, mapType = 'satellite' }) {
   const center = CITY_CENTERS[city] || CITY_CENTERS.pune;
+  const currentTile = MAP_TILE_PROVIDERS[mapType] || MAP_TILE_PROVIDERS.satellite;
 
   return (
     <MapContainer
@@ -45,8 +71,11 @@ function AqiLeafletMap({ city, stations, selectedId, onSelectStation }) {
       attributionControl={false}
     >
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        maxZoom={19}
+        key={mapType}
+        url={currentTile.url}
+        subdomains={currentTile.subdomains}
+        maxZoom={currentTile.maxZoom}
+        attribution={currentTile.attribution}
       />
       <MapRecenter city={city} />
 
@@ -65,10 +94,10 @@ function AqiLeafletMap({ city, stations, selectedId, onSelectStation }) {
             center={[stLat, stLng]}
             radius={isSel ? 16 : 10}
             pathOptions={{
-              color: band.color,
-              weight: isSel ? 3 : 1.5,
+              color: isSel ? '#ffffff' : band.color,
+              weight: isSel ? 3.5 : 2,
               fillColor: band.color,
-              fillOpacity: isSel ? 0.45 : 0.25,
+              fillOpacity: isSel ? 0.85 : 0.65,
             }}
             eventHandlers={{
               click: () => onSelectStation(st.openaqId),
@@ -99,14 +128,14 @@ async function getJson(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${response.status}`);
+    throw new Error(body.message || body.error || `HTTP ${response.status}`);
   }
   return response.json();
 }
 
 function App() {
-  // Navigation: 'home' | 'problem' | 'solution' | 'dashboard' | 'analysis' | 'assistant' | 'profile'
-  const [currentPage, setCurrentPage] = useState('home');
+  // Navigation: 'home' | 'problem' | 'solution' | 'dashboard' | 'analysis' | 'assistant' | 'profile' | 'admin'
+  const [currentPage, setCurrentPage] = useState(() => window.location.pathname === '/admin' ? 'admin' : 'home');
   const [city, setCity] = useState('pune'); // 'pune' | 'delhi'
   const [stations, setStations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -114,9 +143,24 @@ function App() {
   const [alerts, setAlerts] = useState([]);
   const [userProfile, setUserProfile] = useState(null);
   const [products, setProducts] = useState([]);
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = localStorage.getItem('saans_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [orderToast, setOrderToast] = useState(false);
+  const [cartToast, setCartToast] = useState('');
+  const [mapType, setMapType] = useState('satellite'); // 'satellite' | 'street' | 'terrain'
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('saans_cart', JSON.stringify(cart));
+    } catch (_) {}
+  }, [cart]);
 
   // Auth Modal States
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -335,8 +379,24 @@ function App() {
       if (exist) return prev.map(p => p._id === product._id ? { ...p, quantity: p.quantity + 1 } : p);
       return [...prev, { ...product, quantity: 1 }];
     });
-    setOrderToast(true);
-    setTimeout(() => setOrderToast(false), 4000);
+    setCartToast(`Added ${product.name.split('(')[0].trim()} to cart!`);
+    setTimeout(() => setCartToast(''), 3500);
+  }
+
+  function handleUpdateQuantity(productId, delta) {
+    setCart(prev => {
+      return prev.map(it => {
+        if (it._id === productId) {
+          const newQty = it.quantity + delta;
+          return newQty > 0 ? { ...it, quantity: newQty } : null;
+        }
+        return it;
+      }).filter(Boolean);
+    });
+  }
+
+  function handleRemoveFromCart(productId) {
+    setCart(prev => prev.filter(it => it._id !== productId));
   }
 
   async function handleCheckout() {
@@ -353,7 +413,7 @@ function App() {
       setCart([]);
       setIsCartOpen(false);
       setOrderToast(true);
-      setTimeout(() => setOrderToast(false), 4000);
+      setTimeout(() => setOrderToast(false), 5000);
     } catch (e) {
       alert('Checkout error: ' + e.message);
     }
@@ -385,12 +445,22 @@ function App() {
             role: 'assistant',
             content: res.data.content,
             toolsUsed: res.data.toolsUsed || [],
-            showProductCards: text.toLowerCase().includes('mask') || text.toLowerCase().includes('purifier') || text.toLowerCase().includes('protect') || text.toLowerCase().includes('buy'),
+            showProductCards: Boolean(res.data.showProductCards),
+            recommendedProducts: res.data.recommendedProducts || [],
           },
         ]);
       }
     } catch (e) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e.message}`, toolsUsed: [] }]);
+      setChatMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `⚠️ Failed to retrieve atmospheric response: ${e.message}`,
+          toolsUsed: [],
+          isError: true,
+          failedQuery: text.trim(),
+        },
+      ]);
     } finally {
       setIsChatLoading(false);
     }
@@ -437,6 +507,7 @@ function App() {
             <button className={`nav-btn ${currentPage === 'analysis' ? 'active' : ''}`} onClick={() => setCurrentPage('analysis')}>Unified Analysis</button>
             <button className={`nav-btn ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>Dashboard</button>
             <button className={`nav-btn ${currentPage === 'assistant' ? 'active' : ''}`} onClick={() => setCurrentPage('assistant')}>AI Assistant</button>
+            <button className={`nav-btn ${currentPage === 'admin' ? 'active' : ''}`} onClick={() => setCurrentPage('admin')}>🔐 Admin</button>
           </nav>
 
           {/* UTILITY CONTROLS */}
@@ -943,9 +1014,58 @@ function App() {
                 <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>
                   📍 Greater {city === 'pune' ? 'Pune Metropolitan' : 'Delhi NCR'} Monitoring Grid • {stations.length} Live Nodes
                 </span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button className="pill-btn" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}>Street</button>
-                  <button className="pill-btn" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', background: 'var(--primary)', color: '#04120e' }}>Satellite</button>
+                <div style={{ display: 'flex', gap: 5, background: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: 3 }}>
+                  <button
+                    type="button"
+                    onClick={() => setMapType('street')}
+                    style={{
+                      padding: '0.25rem 0.65rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      background: mapType === 'street' ? 'var(--primary)' : 'transparent',
+                      color: mapType === 'street' ? '#04120e' : 'var(--text-muted)',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    🗺️ Street
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMapType('satellite')}
+                    style={{
+                      padding: '0.25rem 0.65rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      background: mapType === 'satellite' ? 'var(--primary)' : 'transparent',
+                      color: mapType === 'satellite' ? '#04120e' : 'var(--text-muted)',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    🛰️ Satellite
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMapType('terrain')}
+                    style={{
+                      padding: '0.25rem 0.65rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      background: mapType === 'terrain' ? 'var(--primary)' : 'transparent',
+                      color: mapType === 'terrain' ? '#04120e' : 'var(--text-muted)',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    ⛰️ Terrain
+                  </button>
                 </div>
               </div>
 
@@ -955,6 +1075,7 @@ function App() {
                   city={city}
                   stations={stations}
                   selectedId={selectedId}
+                  mapType={mapType}
                   onSelectStation={(id) => {
                     setSelectedId(id);
                     loadForecast(id);
@@ -1884,20 +2005,51 @@ function App() {
 
                       {msg.content}
 
-                      {/* INLINE PRODUCT RECOMMENDATION CARDS (FROM VIDEO) */}
+                      {/* Retry Button if an error occurred */}
+                      {msg.isError && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={() => handleSendChat(msg.failedQuery)}
+                            style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem' }}
+                          >
+                            🔄 Retry Request
+                          </button>
+                        </div>
+                      )}
+
+                      {/* INLINE PRODUCT RECOMMENDATION CARDS */}
                       {msg.showProductCards && (
                         <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                           <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 800, textTransform: 'uppercase', marginBottom: '0.75rem' }}>
                             🛡️ Recommended Protection Essentials for Your Area
                           </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
-                            {products.slice(0, 2).map(prod => (
-                              <div key={prod._id} style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: 10, padding: '0.85rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <strong style={{ fontSize: '0.85rem' }}>{prod.name.split('(')[0]}</strong>
-                                  <span style={{ color: 'var(--primary)', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>₹{prod.price}</span>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.75rem' }}>
+                            {(msg.recommendedProducts && msg.recommendedProducts.length > 0 ? msg.recommendedProducts : products).slice(0, 3).map(prod => (
+                              <div key={prod._id || prod.name} style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: 10, padding: '0.85rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                                <div>
+                                  {prod.image && (
+                                    <img src={prod.image} alt={prod.name} style={{ width: '100%', height: '90px', objectFit: 'cover', borderRadius: 6, marginBottom: 8 }} />
+                                  )}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
+                                    <strong style={{ fontSize: '0.82rem', lineHeight: 1.3 }}>{prod.name}</strong>
+                                    <span style={{ color: 'var(--primary)', fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>₹{prod.price}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                                    <span style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                                      {prod.category}
+                                    </span>
+                                    {prod.useCase && (
+                                      <span style={{ fontSize: '0.65rem', background: 'rgba(0,229,153,0.1)', color: 'var(--primary)', padding: '1px 5px', borderRadius: 4, textTransform: 'capitalize' }}>
+                                        {prod.useCase}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.35 }}>
+                                    {prod.recommendationReason || prod.description?.slice(0, 60) + '...'}
+                                  </p>
                                 </div>
-                                <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 4 }}>{prod.description.slice(0, 60)}...</p>
                                 <button className="btn-primary" onClick={() => handleAddToCart(prod)} style={{ marginTop: '0.65rem', width: '100%', padding: '0.35rem', fontSize: '0.75rem', justifyContent: 'center' }}>
                                   + Add to Cart
                                 </button>
@@ -1905,7 +2057,7 @@ function App() {
                             ))}
                           </div>
                           <button className="btn-outline" onClick={() => setIsCartOpen(true)} style={{ marginTop: '0.75rem', width: '100%', padding: '0.5rem', fontSize: '0.8rem', justifyContent: 'center' }}>
-                            View Protection Cart ➔
+                            View Protection Cart ({cart.reduce((s, i) => s + i.quantity, 0)}) ➔
                           </button>
                         </div>
                       )}
@@ -2437,6 +2589,26 @@ function App() {
       )}
 
       {/* ────────────────────────────────────────────────────────
+          PAGE: ADMIN PORTAL
+          ──────────────────────────────────────────────────────── */}
+      {currentPage === 'admin' && (
+        <AdminPortal onBackToDashboard={() => setCurrentPage('dashboard')} />
+      )}
+
+      {/* ────────────────────────────────────────────────────────
+          ITEM ADDED TO CART TOAST NOTIFICATION
+          ──────────────────────────────────────────────────────── */}
+      {cartToast && (
+        <div style={{ position: 'fixed', bottom: '2rem', right: '2rem', background: '#0a251e', border: '1px solid var(--primary)', padding: '0.85rem 1.25rem', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', gap: '0.75rem', animation: 'slideUp 0.3s ease' }}>
+          <span style={{ fontSize: '1.3rem', color: 'var(--primary)' }}>🛒</span>
+          <div>
+            <strong style={{ color: '#fff', fontSize: '0.85rem' }}>{cartToast}</strong>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Item count updated in protection cart.</div>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────
           ORDER PLACED TOAST NOTIFICATION (MATCHING VIDEO)
           ──────────────────────────────────────────────────────── */}
       {orderToast && (
@@ -2444,13 +2616,13 @@ function App() {
           <span style={{ fontSize: '1.5rem', color: 'var(--primary)' }}>✓</span>
           <div>
             <strong style={{ color: '#fff', fontSize: '0.9rem' }}>Order Placed Successfully</strong>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Your protection items are on their way with expedited delivery.</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Simulated order recorded. Items scheduled for dispatch to PCCOE Campus.</div>
           </div>
         </div>
       )}
 
       {/* ────────────────────────────────────────────────────────
-          CART MODAL
+          CART MODAL WITH QUANTITY CONTROLS & CHECKOUT
           ──────────────────────────────────────────────────────── */}
       {isCartOpen && (
         <div className="cart-modal-overlay" onClick={() => setIsCartOpen(false)}>
@@ -2462,31 +2634,73 @@ function App() {
 
             {cart.length > 0 ? (
               <div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '300px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '320px', overflowY: 'auto' }}>
                   {cart.map(it => (
-                    <div key={it._id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
-                      <div>
-                        <strong>{it.name}</strong>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Qty: {it.quantity} × ₹{it.price}</div>
+                    <div key={it._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                      <div style={{ flex: 1, paddingRight: '0.5rem' }}>
+                        <strong style={{ fontSize: '0.85rem' }}>{it.name}</strong>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>₹{it.price} each</div>
                       </div>
-                      <div style={{ fontWeight: 800, fontFamily: 'var(--font-mono)' }}>₹{it.price * it.quantity}</div>
+
+                      {/* Stepper controls */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateQuantity(it._id, -1)}
+                          style={{ width: 26, height: 26, borderRadius: 6, background: 'rgba(255,255,255,0.08)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 900 }}
+                        >
+                          -
+                        </button>
+                        <span style={{ fontWeight: 800, fontFamily: 'var(--font-mono)', minWidth: 20, textAlign: 'center' }}>
+                          {it.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateQuantity(it._id, 1)}
+                          style={{ width: 26, height: 26, borderRadius: 6, background: 'rgba(255,255,255,0.08)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 900 }}
+                        >
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFromCart(it._id)}
+                          title="Remove item"
+                          style={{ marginLeft: 6, background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: '0.75rem' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div style={{ width: 75, textAlign: 'right', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--primary)', marginLeft: 8 }}>
+                        ₹{it.price * it.quantity}
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: '1.15rem', fontWeight: 800 }}>
-                  <span>Total Amount</span>
-                  <span style={{ color: 'var(--primary)', fontFamily: 'var(--font-mono)' }}>
-                    ₹{cart.reduce((s, i) => s + i.price * i.quantity, 0).toLocaleString('en-IN')}
-                  </span>
+                <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+                    <span>Estimated Shipping to PCCOE Nigdi</span>
+                    <span style={{ color: 'var(--primary)' }}>FREE Expedited</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.15rem', fontWeight: 800 }}>
+                    <span>Total Amount</span>
+                    <span style={{ color: 'var(--primary)', fontFamily: 'var(--font-mono)' }}>
+                      ₹{cart.reduce((s, i) => s + i.price * i.quantity, 0).toLocaleString('en-IN')}
+                    </span>
+                  </div>
                 </div>
 
-                <button className="btn-primary" onClick={handleCheckout} style={{ marginTop: '1.5rem', width: '100%', justifyContent: 'center' }}>
-                  Confirm Order & Dispatch ➔
+                <div style={{ marginTop: '1rem', background: 'rgba(0, 229, 153, 0.05)', padding: '0.65rem 0.85rem', borderRadius: 8, fontSize: '0.72rem', color: 'var(--text-muted)', border: '1px solid rgba(0, 229, 153, 0.15)' }}>
+                  ℹ️ <strong>Simulated Prototype Checkout</strong>: Placing this order generates a mock transaction for presentation without real payment gateway charges.
+                </div>
+
+                <button className="btn-primary" onClick={handleCheckout} style={{ marginTop: '1rem', width: '100%', justifyContent: 'center' }}>
+                  Proceed to Simulated Checkout ➔
                 </button>
               </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+              <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
                 Your protection cart is empty. Add HEPA purifiers or N95 masks from the AI assistant or catalog.
               </div>
             )}
