@@ -555,60 +555,6 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* AUTOPILOT VIDEO TOUR STYLING */
-.tour-controller-bar {
-  position: fixed;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(6, 26, 20, 0.94);
-  border: 1px solid var(--primary);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 30px var(--primary-glow);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 18px;
-  padding: 1rem 1.5rem;
-  z-index: 9999;
-  width: 92%;
-  max-width: 920px;
-  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.tour-spotlight-pulse {
-  position: relative;
-  outline: 3px solid var(--primary) !important;
-  box-shadow: 0 0 35px rgba(0, 229, 153, 0.6) !important;
-  transition: all 0.4s ease !important;
-}
-
-.tour-cue-text {
-  font-size: 0.9rem;
-  color: #fff;
-  line-height: 1.5;
-  background: rgba(0, 0, 0, 0.4);
-  border-left: 3px solid var(--primary);
-  padding: 0.65rem 1rem;
-  border-radius: 8px;
-  font-weight: 500;
-}
-
-.tour-progress-bar-bg {
-  height: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 99px;
-  overflow: hidden;
-  width: 100%;
-}
-
-.tour-progress-bar-fill {
-  height: 100%;
-  background: var(--primary);
-  transition: width 0.3s linear;
-}
-
 @media (max-width: 1024px) {
   .hero-wrap {
     grid-template-columns: 1fr;
