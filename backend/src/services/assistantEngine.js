@@ -5,6 +5,7 @@ import { Product } from '../models/Product.js';
 import { DEMO_STATIONS, generateDemoReadings, calculateCpcbAqi } from './demoData.js';
 import { optimizeCommuteRoute, CORRIDOR_PRESETS } from './commuteOptimizer.js';
 import { forecastForStation } from './forecast.js';
+import { generateGroqResponse } from './groqService.js';
 
 // User's default college profile for "near my college" queries
 export const USER_COLLEGE_LOCATION = {
@@ -16,6 +17,13 @@ export const USER_COLLEGE_LOCATION = {
 // Known geographic aliases mapped to monitoring stations
 export const LOCATION_ALIASES = [
   // Pune Metropolitan Nodes
+  {
+    keywords: ['pune', 'pune city', 'pcmc', 'pimpri', 'chinchwad'],
+    stationId: 11610,
+    city: 'pune',
+    matchedName: 'Nigdi / Akurdi (PCCOE Vicinity), Pune',
+    landmark: 'Pune Metropolitan Region (Nigdi / PCCOE Node)',
+  },
   {
     keywords: ['pccoe', 'pccoe campus', 'akurdi', 'nigdi', 'pradhikaran', 'ravet'],
     stationId: 11610,
@@ -68,7 +76,7 @@ export const LOCATION_ALIASES = [
 
   // Delhi NCR Nodes
   {
-    keywords: ['anand vihar', 'isbt anand vihar', 'ghaziabad border', 'east delhi'],
+    keywords: ['delhi', 'new delhi', 'ncr', 'delhi ncr', 'national capital', 'anand vihar', 'isbt anand vihar', 'ghaziabad border', 'east delhi'],
     stationId: 7001,
     city: 'delhi',
     matchedName: 'Anand Vihar, Delhi - DPCC',
@@ -191,6 +199,43 @@ export function resolveLocation({ message, conversationHistory = [], currentCity
  */
 export function detectIntent(message) {
   const text = (message || '').toLowerCase();
+
+  // 0. Greeting & Identity & Capability Inquiries (only if not asking a specific domain question)
+  const isSpecificDomainQuery =
+    text.includes('product') ||
+    text.includes('mask') ||
+    text.includes('purifier') ||
+    text.includes('filter') ||
+    text.includes('commute') ||
+    text.includes('route') ||
+    text.includes('cigarette') ||
+    text.includes('dose') ||
+    text.includes('run') ||
+    text.includes('forecast') ||
+    text.includes('why') ||
+    text.includes('aqi') ||
+    text.includes('pm2.5') ||
+    text.includes('pm10') ||
+    text.includes('safe to');
+
+  if (!isSpecificDomainQuery) {
+    if (
+      text === 'hi' ||
+      text === 'hello' ||
+      text === 'hey' ||
+      text === 'help' ||
+      text === 'help me' ||
+      text.startsWith('hi ') ||
+      text.startsWith('hello ') ||
+      text.startsWith('hey ') ||
+      text.includes('who are you') ||
+      text.includes('what can you do') ||
+      text.includes('how does this work') ||
+      text.includes('what are your capabilities')
+    ) {
+      return 'greeting';
+    }
+  }
 
   // 1. Commute Route Optimization
   if (
@@ -341,17 +386,28 @@ export async function getStationAndReadings(stationId, city = 'pune') {
 
   if (mongoose.connection.readyState === 1) {
     try {
-      station = await Station.findOne({
-        $or: [
-          { openaqId: Number(stationId) || null },
-          { _id: mongoose.isValidObjectId(stationId) ? stationId : null },
-        ],
-      }).lean();
+      const isHex24 = typeof stationId === 'string' && /^[0-9a-fA-F]{24}$/.test(stationId);
+      const orConditions = [];
+      if (Number.isFinite(Number(stationId)) && Number(stationId) > 0) {
+        orConditions.push({ openaqId: Number(stationId) });
+      }
+      if (isHex24) {
+        orConditions.push({ _id: stationId });
+      }
+      if (!orConditions.length) {
+        orConditions.push({ city: (city || 'pune').toLowerCase() });
+      }
+      station = await Station.findOne({ $or: orConditions }).lean();
 
       if (station) {
-        readings = await Reading.find({
-          $or: [{ stationId: station.openaqId }, { station: station._id }],
-        }).sort({ ts: -1 }).limit(72).lean();
+        const readingConditions = [];
+        if (station.openaqId) readingConditions.push({ stationId: station.openaqId });
+        if (station._id && /^[0-9a-fA-F]{24}$/.test(String(station._id))) {
+          readingConditions.push({ station: station._id });
+        }
+        readings = await Reading.find(
+          readingConditions.length ? { $or: readingConditions } : { stationId: station.openaqId }
+        ).sort({ ts: -1 }).limit(72).lean();
 
         if (readings.length > 0) {
           latestReading = readings[0];
@@ -459,12 +515,77 @@ export async function executeAssistantQuery({
   let showProductCards = false;
   let recommendedProductsList = [];
 
-  // D. Tool Execution by Intent
+  // ── HYBRID GROQ LLM INFERENCE (If GROQ_API_KEY is configured) ──────────
+  if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.trim() && process.env.GROQ_API_KEY !== 'your_groq_api_key_here') {
+    const groqResult = await generateGroqResponse({
+      message,
+      conversationHistory,
+      station,
+      latestReading,
+      aqiVal,
+      pm25,
+      pm10,
+      no2,
+      dominant,
+      aqiCat,
+      stationLocationLabel,
+      health,
+      intent,
+    });
+
+    if (groqResult && groqResult.content) {
+      const shouldShowProducts = intent === 'product_recommendations' ||
+        /mask|purifier|hepa|buy|purchase|filter|monitor/i.test(message);
+
+      if (shouldShowProducts && mongoose.connection.readyState === 1) {
+        try {
+          recommendedProductsList = await Product.find({ isActive: true }).limit(3).lean();
+        } catch (_) {}
+      }
+
+      return {
+        content: groqResult.content,
+        toolsUsed: groqResult.toolsUsed,
+        station: station.name,
+        location: stationLocationLabel,
+        aqi: aqiVal,
+        intent,
+        showProductCards: shouldShowProducts,
+        recommendedProducts: shouldShowProducts ? recommendedProductsList : [],
+        latencyMs: Date.now() - startTime,
+        source: 'groq-llama3',
+      };
+    }
+  }
+
+  // D. Tool Execution by Intent (Deterministic Fallback / Offline Engine)
+
+  // ─────────────────────────────────────────────────────────────
+  // INTENT 0: Greeting & Capability Introduction
+  // ─────────────────────────────────────────────────────────────
+  if (intent === 'greeting') {
+    toolsUsed.push({
+      toolName: 'assistant_capability_directory',
+      queryParameters: { userGreeting: message },
+      outputSummary: 'Dispatched interactive system capability guide & quick consultation prompts.',
+    });
+
+    reply = `👋 **Hello! I am your SAANS Agentic AI Health & Air Quality Assistant.**\n\n` +
+      `I monitor live CPCB ground stations and satellite atmospheric reanalysis across **Pune** and **Delhi NCR** to help you protect your respiratory health.\n\n` +
+      `Here is what you can ask me:\n` +
+      `• 📍 *"What is the AQI near PCCOE Campus or in Delhi?"*\n` +
+      `• 🌫️ *"Why is pollution high in Delhi today?"*\n` +
+      `• 🏃 *"Can I go for an evening run today at 7 PM?"*\n` +
+      `• 🚗 *"What is the safest commute route from PCCOE to Hinjewadi?"*\n` +
+      `• 🚬 *"How many passive cigarettes am I inhaling today?"*\n` +
+      `• 🛡️ *"Which N95 mask or HEPA purifier should I buy for asthma?"*\n\n` +
+      `How can I assist your health and travel plans right now?`;
+  }
 
   // ─────────────────────────────────────────────────────────────
   // INTENT 1: Commute Route Optimization
   // ─────────────────────────────────────────────────────────────
-  if (intent === 'commute_optimization') {
+  else if (intent === 'commute_optimization') {
     toolsUsed.push({
       toolName: 'get_commute_analysis',
       queryParameters: { city: station.city, basePM25: pm25, corridorId: 'pccoe_hinjewadi' },
@@ -588,24 +709,42 @@ export async function executeAssistantQuery({
   // INTENT 5: Pollution Drivers & Atmospheric SHAP Explanation
   // ─────────────────────────────────────────────────────────────
   else if (intent === 'pollution_explanation') {
+    const isDelhi = station.city === 'delhi';
     toolsUsed.push({
       toolName: 'get_explanation',
       queryParameters: { station: station.name, city: station.city },
-      outputSummary: 'TreeSHAP LightGBM feature attribution: Planetary boundary layer descent (+22 AQI), vehicular influx (+16 AQI), surface wind dilution (-24 AQI).',
+      outputSummary: isDelhi
+        ? 'TreeSHAP LightGBM feature attribution (Delhi): Severe winter inversion (+28 AQI), biomass & stubble transport (+22 AQI), low ventilation (+18 AQI).'
+        : 'TreeSHAP LightGBM feature attribution (Pune): Planetary boundary layer descent (+22 AQI), vehicular influx (+16 AQI), surface wind dilution (-24 AQI).',
     });
 
-    reply = `🔬 **Atmospheric Attribution & Explainable AI (SHAP) Report**\n` +
-      `**Matched Station**: 📍 ${station.name}\n` +
-      `**Location**: ${stationLocationLabel}\n` +
-      `**Current AQI**: **${aqiVal} (${aqiCat.category})** | PM2.5: ${pm25} µg/m³ | NO₂: ${no2} ppb\n` +
-      `**Model Engine**: Trained LightGBM Gradient Boosted Trees with TreeSHAP\n\n` +
-      `### Key Atmospheric Drivers Determining Pollution Here:\n` +
-      `1. **Planetary Boundary Layer Descent (+22 AQI Impact)**:\n` +
-      `   Cooling ground temperatures compress the atmospheric mixing layer below 250 meters, physically trapping ground-level vehicular soot and combustion particles in a dense ceiling.\n\n` +
-      `2. **Traffic Precursors & NO₂ Influx (+16 AQI Impact)**:\n` +
-      `   Nitrogen dioxide from commuter corridors (Old Pune-Mumbai Hwy / NH-48 / Vikas Marg) acts as a reactive catalyst, accelerating secondary aerosol formation.\n\n` +
-      `3. **Wind Speed & Horizontal Ventilation (-24 AQI Mitigating Factor)**:\n` +
-      `   Afternoon surface breezes (>10 km/h) supply crucial fresh air flushing, preventing hazardous stagnation. When wind drops below 6 km/h, AQI spikes rapidly.`;
+    if (isDelhi) {
+      reply = `🔬 **Atmospheric Attribution & Explainable AI (SHAP) Report for Delhi NCR**\n` +
+        `**Matched Station**: 📍 ${station.name}\n` +
+        `**Location**: ${stationLocationLabel}\n` +
+        `**Current AQI**: **${aqiVal} (${aqiCat.category})** | PM2.5: ${pm25} µg/m³ | NO₂: ${no2} ppb\n` +
+        `**Model Engine**: Trained LightGBM Gradient Boosted Trees with TreeSHAP\n\n` +
+        `### Key Atmospheric Drivers Determining Delhi's Elevated Pollution:\n` +
+        `1. **Planetary Boundary Layer Descent & Thermal Inversion (+28 AQI Impact)**:\n` +
+        `   Severe nocturnal radiative cooling over the Indo-Gangetic Plain compresses the atmospheric mixing layer below 150 meters, trapping ground-level vehicular soot, smoke, and industrial particulate matter in a stagnant ceiling.\n\n` +
+        `2. **Regional Agricultural Stubble & Biomass Transport (+22 AQI Impact)**:\n` +
+        `   Seasonal north-westerly wind trajectories advect dense biomass combustion aerosols from upwind regional agricultural belts directly into Delhi's landlocked basin.\n\n` +
+        `3. **Calm Surface Winds & Trapped Traffic Exhaust (+18 AQI Impact)**:\n` +
+        `   Surface breezes dropping below 5 km/h eliminate horizontal ventilation, preventing the dispersal of dense commuter emissions along arterial corridors like the Ring Road and ISBT Anand Vihar.`;
+    } else {
+      reply = `🔬 **Atmospheric Attribution & Explainable AI (SHAP) Report for Pune Metropolitan**\n` +
+        `**Matched Station**: 📍 ${station.name}\n` +
+        `**Location**: ${stationLocationLabel}\n` +
+        `**Current AQI**: **${aqiVal} (${aqiCat.category})** | PM2.5: ${pm25} µg/m³ | NO₂: ${no2} ppb\n` +
+        `**Model Engine**: Trained LightGBM Gradient Boosted Trees with TreeSHAP\n\n` +
+        `### Key Atmospheric Drivers Determining Pollution Here:\n` +
+        `1. **Planetary Boundary Layer Descent (+22 AQI Impact)**:\n` +
+        `   Cooling ground temperatures compress the atmospheric mixing layer below 250 meters, physically trapping ground-level vehicular soot and combustion particles in a dense ceiling.\n\n` +
+        `2. **Traffic Precursors & NO₂ Influx (+16 AQI Impact)**:\n` +
+        `   Nitrogen dioxide from commuter corridors (Old Pune-Mumbai Hwy / NH-48 / Hinjewadi Spine) acts as a reactive catalyst, accelerating secondary aerosol formation.\n\n` +
+        `3. **Wind Speed & Horizontal Ventilation (-24 AQI Mitigating Factor)**:\n` +
+        `   Afternoon surface breezes (>10 km/h) supply crucial fresh air flushing, preventing hazardous stagnation. When wind drops below 6 km/h, AQI spikes rapidly.`;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
