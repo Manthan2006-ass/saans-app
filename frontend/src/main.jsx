@@ -452,6 +452,9 @@ function App() {
       });
 
       if (res.data) {
+        if (res.data.stationId && String(res.data.stationId) !== String(selectedStation?.openaqId)) {
+          setSelectedId(res.data.stationId);
+        }
         setChatMessages(prev => [
           ...prev,
           {
@@ -686,7 +689,11 @@ function App() {
               <div style={{ marginTop: '1.5rem', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: 10, borderLeft: '4px solid var(--primary)', fontSize: '0.85rem', lineHeight: 1.5 }}>
                 <strong style={{ color: 'var(--primary)' }}>⚡ SAANS AI Risk Insight:</strong>
                 <p style={{ color: 'var(--text-muted)', marginTop: 4 }}>
-                  Falling wind speed ({latestR.windSpeed || 11} km/h) & evening commute will push AQI to 184 by 7:00 PM. Avoid outdoor workouts.
+                  {aqiVal <= 50
+                    ? `Clean air conditions with wind speed at ${latestR.windSpeed || 11} km/h. AQI expected to remain Good throughout the day.`
+                    : aqiVal <= 100
+                    ? `Moderate evening commute traffic may push AQI to ~${Math.min(125, Math.round(aqiVal * 1.2))} by 7:00 PM. Outdoor activities remain safe.`
+                    : `Falling wind speed (${latestR.windSpeed || 11} km/h) & evening commute will push AQI to ~${Math.min(320, Math.round(aqiVal * 1.3))} by 7:00 PM. Sensitive groups should avoid evening outdoor workouts.`}
                 </p>
               </div>
             </div>

@@ -154,12 +154,29 @@ export function resolveLocation({ message, conversationHistory = [], currentCity
     }
   }
 
-  // 2. Check conversation history for follow-up location context
+  // 2. Use currently selected active station if provided (active context in UI)
+  if (currentStationId) {
+    const selected = DEMO_STATIONS.find(s => s.openaqId === Number(currentStationId));
+    if (selected) {
+      return {
+        isUnsupported: false,
+        stationId: selected.openaqId,
+        city: selected.city,
+        matchedName: selected.name,
+        landmark: selected.name.split(',')[0],
+        isSelected: true,
+      };
+    }
+  }
+
+  // 3. Check conversation history for follow-up location context (only user turns)
   if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
+      if (conversationHistory[i]?.role !== 'user') continue;
       const prevMsg = conversationHistory[i]?.content?.toLowerCase() || '';
       for (const alias of LOCATION_ALIASES) {
         for (const kw of alias.keywords) {
+          if (kw === 'pune' || kw === 'delhi' || kw === 'ncr') continue;
           const regex = new RegExp(`\\b${kw}\\b`, 'i');
           if (regex.test(prevMsg)) {
             return {
@@ -176,12 +193,9 @@ export function resolveLocation({ message, conversationHistory = [], currentCity
     }
   }
 
-  // 3. Fallback to currently selected dashboard station or default city
+  // 4. Fallback to currently selected dashboard station or default city
   const cityKey = (currentCity || 'pune').toLowerCase();
-  let defaultStation = DEMO_STATIONS.find(s => s.openaqId === Number(currentStationId));
-  if (!defaultStation) {
-    defaultStation = DEMO_STATIONS.find(s => s.city === cityKey) || DEMO_STATIONS[0];
-  }
+  let defaultStation = DEMO_STATIONS.find(s => s.city === cityKey) || DEMO_STATIONS[0];
 
   return {
     isUnsupported: false,
@@ -547,6 +561,7 @@ export async function executeAssistantQuery({
         content: groqResult.content,
         toolsUsed: groqResult.toolsUsed,
         station: station.name,
+        stationId: station.openaqId,
         location: stationLocationLabel,
         aqi: aqiVal,
         intent,
@@ -962,6 +977,7 @@ export async function executeAssistantQuery({
     content: reply,
     toolsUsed,
     station: station.name,
+    stationId: station.openaqId,
     location: stationLocationLabel,
     aqi: aqiVal,
     intent,
