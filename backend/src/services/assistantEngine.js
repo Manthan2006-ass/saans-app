@@ -697,11 +697,11 @@ export async function executeAssistantQuery({
     if (isHazardousForCardio) {
       reply += `❌ **High Risk for Outdoor Cardio**: Ambient fine particulates (${pm25} µg/m³) are elevated. During heavy breathing (running/cycling), your minute ventilation volume increases by 400–600%, pushing micro-particulates deep into lung alveoli.\n\n` +
         `• **Recommendation**: Shift workouts indoors to an air-filtered environment today.\n` +
-        `• **Safest Alternate Window**: If you must exercise outside, the safest window is **1:30 PM – 4:30 PM**, when thermal turbulence dilutes street-level soot.\n` +
+        `• **Safest Alternate Window**: If you must exercise outside, the safest window is **2:30 PM – 5:00 PM** (afternoon solar mixing before evening commute inversion), when thermal turbulence dilutes street-level soot.\n` +
         `• **Vulnerable Groups Alert**: Asthmatic, cardiac, and elderly individuals must strictly avoid morning rush-hour running.`;
     } else if (isModerate) {
       reply += `⚠️ **Moderate Caution**: Air quality is acceptable for light to moderate activity, but sensitive individuals (asthma/allergies) may experience airway irritation during prolonged exertion.\n\n` +
-        `• **Best Window**: **2:00 PM – 5:00 PM**.\n` +
+        `• **Best Window**: **2:30 PM – 5:00 PM** (clearest atmospheric window before evening rush).\n` +
         `• **Precautions**: Avoid high-traffic arterial roads; choose canopy-covered parks.`;
     } else {
       reply += `✅ **Good Conditions for Outdoor Running**: Current air quality is favorable for outdoor workouts across ${stationLocationLabel}. Enjoy your run!`;
@@ -723,10 +723,11 @@ export async function executeAssistantQuery({
       `**Location Area**: ${stationLocationLabel}\n` +
       `**Current AQI**: **${aqiVal} (${aqiCat.category})** | Dominant: ${dominant} (${pm25} µg/m³)\n` +
       `**Telemetry Timestamp**: ${dataTs}\n\n` +
-      `### Diurnal Smog Cycle Breakdown:\n` +
-      `• **🚫 6:30 AM – 9:30 AM (Peak Danger)**: Ground-level temperature inversion traps diesel exhaust and dust in the shallow nocturnal boundary layer (<200m). Avoid running or ventilating rooms.\n` +
-      `• **✅ 1:30 PM – 4:30 PM (Safest Window)**: Solar surface heating induces vertical convective thermals, lifting and diluting particulate matter. **This is your best window for errands, walking, and opening windows.**\n` +
-      `• **⚠️ 7:30 PM – 10:30 PM (Evening Surge)**: Commuter congestion and cooling surface air cause particulates to re-accumulate near ground level.`;
+      `### Diurnal Smog & Outdoor Activity Schedule:\n` +
+      `• **🚫 6:30 AM – 9:00 AM (Peak Inversion Hazard)**: Nocturnal boundary layer compression (<200m) traps diesel soot and dust. Avoid heavy outdoor cardio or room aeration.\n` +
+      `• **☀️ 11:30 AM – 2:30 PM (Atmospheric Convection Peak — Safest Window)**: Strong solar surface heating drives vertical mixing thermals, diluting particulates to daily lows. **Optimal time for aeration, errands, and walking.**\n` +
+      `• **🏃 2:30 PM – 5:00 PM (Best Exercise Window)**: Favorable atmospheric dispersion before evening commute stagnation; ideal for outdoor running.\n` +
+      `• **⚠️ 6:30 PM – 9:00 PM (Evening Surge Trap)**: Commuter gridlock and falling nocturnal boundary layer trap emissions at street level.`;
   }
 
   // ─────────────────────────────────────────────────────────────

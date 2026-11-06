@@ -12,18 +12,68 @@ function renderChatContent(text) {
   if (!text) return null;
   const lines = text.split('\n');
   return lines.map((line, i) => {
-    // ### heading
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return <div key={i} style={{ height: '0.5rem' }} />;
+    }
+    // Headings
     if (line.startsWith('### ')) {
-      return <div key={i} style={{ fontWeight: 800, color: '#00e599', marginTop: '0.75rem', marginBottom: '0.2rem', fontSize: '0.9rem' }}>{line.slice(4)}</div>;
+      return (
+        <div key={i} style={{ fontWeight: 800, color: '#00e599', marginTop: '0.85rem', marginBottom: '0.25rem', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          <span>◈</span> {line.slice(4)}
+        </div>
+      );
     }
-    // ## heading
     if (line.startsWith('## ')) {
-      return <div key={i} style={{ fontWeight: 800, color: '#fff', marginTop: '0.75rem', fontSize: '0.95rem' }}>{line.slice(3)}</div>;
+      return (
+        <div key={i} style={{ fontWeight: 900, color: '#fff', marginTop: '1rem', marginBottom: '0.35rem', fontSize: '1.05rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.25rem' }}>
+          {line.slice(3)}
+        </div>
+      );
     }
-    // Bold inline: replace **text** with <strong>
-    const parts = line.split(/\*\*(.*?)\*\*/g);
-    const rendered = parts.map((p, j) => j % 2 === 1 ? <strong key={j} style={{ color: '#fff' }}>{p}</strong> : p);
-    return <div key={i} style={{ marginBottom: line.startsWith('•') || line.startsWith('-') ? '0.15rem' : '0' }}>{rendered}</div>;
+    // Bullet / List item
+    const isBullet = trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('*');
+    const isNumbered = /^\d+\./.test(trimmed);
+
+    // Format inline markdown (bold & italic)
+    const renderInline = (str) => {
+      // split on bold **
+      const boldParts = str.split(/\*\*(.*?)\*\*/g);
+      return boldParts.map((p, j) => {
+        if (j % 2 === 1) {
+          return <strong key={j} style={{ color: '#fff', fontWeight: 700 }}>{p}</strong>;
+        }
+        // handle italics *
+        const italicParts = p.split(/\*(.*?)\*/g);
+        return italicParts.map((ip, ij) => ij % 2 === 1 ? <em key={ij} style={{ color: '#a7f3d0' }}>{ip}</em> : ip);
+      });
+    };
+
+    if (isBullet) {
+      const contentStr = trimmed.replace(/^[•\-*]\s*/, '');
+      return (
+        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.3rem', paddingLeft: '0.4rem' }}>
+          <span style={{ color: 'var(--primary)', fontSize: '0.75rem', marginTop: '0.25rem', lineHeight: 1 }}>●</span>
+          <div style={{ flex: 1 }}>{renderInline(contentStr)}</div>
+        </div>
+      );
+    }
+
+    if (isNumbered) {
+      const match = trimmed.match(/^(\d+\.)\s*(.*)/);
+      return (
+        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.45rem', marginBottom: '0.35rem', paddingLeft: '0.4rem' }}>
+          <span style={{ color: '#00e599', fontWeight: 800, fontSize: '0.85rem' }}>{match ? match[1] : ''}</span>
+          <div style={{ flex: 1 }}>{renderInline(match ? match[2] : trimmed)}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={i} style={{ marginBottom: '0.25rem' }}>
+        {renderInline(line)}
+      </div>
+    );
   });
 }
 
@@ -54,6 +104,13 @@ function MapRecenter({ city }) {
 }
 
 const MAP_TILE_PROVIDERS = {
+  dark: {
+    name: 'Dark Carto',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    subdomains: ['a', 'b', 'c', 'd'],
+    maxZoom: 19,
+    attribution: '&copy; CartoDB &copy; OpenStreetMap',
+  },
   satellite: {
     name: 'Satellite',
     url: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
@@ -63,17 +120,10 @@ const MAP_TILE_PROVIDERS = {
   },
   street: {
     name: 'Street',
-    url: 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-    maxZoom: 20,
-    attribution: '&copy; Google Maps',
-  },
-  terrain: {
-    name: 'Terrain',
-    url: 'https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
-    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-    maxZoom: 20,
-    attribution: '&copy; Google Maps',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    subdomains: ['a', 'b', 'c', 'd'],
+    maxZoom: 19,
+    attribution: '&copy; CartoDB Voyager',
   },
 };
 
@@ -87,7 +137,7 @@ function AqiLeafletMap({ city, stations, selectedId, onSelectStation, mapType = 
       center={[center.lat, center.lng]}
       zoom={center.zoom}
       style={{ width: '100%', height: '100%' }}
-      zoomControl={false}
+      zoomControl={true}
       attributionControl={false}
     >
       <TileLayer
@@ -174,7 +224,7 @@ function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [orderToast, setOrderToast] = useState(false);
   const [cartToast, setCartToast] = useState('');
-  const [mapType, setMapType] = useState('satellite'); // 'satellite' | 'street' | 'terrain'
+  const [mapType, setMapType] = useState('dark'); // 'satellite' | 'street' | 'terrain'
 
   useEffect(() => {
     try {
@@ -524,10 +574,10 @@ function App() {
             <button className={`nav-btn ${currentPage === 'home' ? 'active' : ''}`} onClick={() => setCurrentPage('home')}>Home</button>
             <button className={`nav-btn ${currentPage === 'problem' ? 'active' : ''}`} onClick={() => setCurrentPage('problem')}>Problem</button>
             <button className={`nav-btn ${currentPage === 'solution' ? 'active' : ''}`} onClick={() => setCurrentPage('solution')}>Solution</button>
-            <button className={`nav-btn ${currentPage === 'analysis' ? 'active' : ''}`} onClick={() => setCurrentPage('analysis')}>Analysis</button>
+            <button className={`nav-btn ${currentPage === 'analysis' ? 'active' : ''}`} onClick={() => setCurrentPage('analysis')}>Unified Analysis</button>
             <button className={`nav-btn ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>Dashboard</button>
             <button className={`nav-btn ${currentPage === 'assistant' ? 'active' : ''}`} onClick={() => setCurrentPage('assistant')}>AI Assistant</button>
-            <button className={`nav-btn ${currentPage === 'admin' ? 'active' : ''}`} onClick={() => setCurrentPage('admin')}>🔐 Admin</button>
+            <button className={`nav-btn ${currentPage === 'admin' ? 'active' : ''}`} onClick={() => setCurrentPage('admin')} title="Demo Control Panel for Evaluation">🔐 Admin <span style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: 4, marginLeft: 2 }}>Demo</span></button>
           </nav>
 
           {/* UTILITY CONTROLS */}
@@ -584,7 +634,7 @@ function App() {
                 <button
                   className="pill-btn"
                   onClick={handleLogout}
-                  style={{ color: 'var(--text-dim)', fontSize: '0.72rem', padding: '0.35rem 0.55rem' }}
+                  style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', fontSize: '0.74rem', padding: '0.35rem 0.65rem', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}
                   title="Sign out of session"
                 >
                   Sign Out
@@ -634,7 +684,7 @@ function App() {
               </div>
 
               <div style={{ display: 'flex', gap: '1.25rem', marginTop: '2.5rem', fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 600 }}>
-                <span>• 29 Indian Cities & States</span>
+                <span>• Hyperlocal High-Density Sensor Grid</span>
                 <span>• SHAP Explainable ML</span>
                 <span>• Open-Meteo & CPCB Live Data</span>
               </div>
@@ -717,7 +767,7 @@ function App() {
                   <div className="framework-num">01</div>
                   <div className="framework-badge">DETECT</div>
                   <div className="framework-title">Hyperlocal AQI</div>
-                  <div className="framework-desc">Live station readings for PM2.5, PM10, NO₂, and O₃ across 10 regional nodes.</div>
+                  <div className="framework-desc">Live station readings for PM2.5, PM10, NO₂, and O₃ across regional continuous monitoring nodes in Pune & Delhi.</div>
                 </div>
                 <div style={{ marginTop: '1.25rem', color: 'var(--primary)', fontSize: '0.8rem', fontWeight: 700 }}>
                   Explore module ➔
@@ -1189,8 +1239,8 @@ function App() {
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button onClick={() => setShowWalkthrough(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  Skip Walkthrough
+                <button onClick={() => setShowWalkthrough(false)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', cursor: 'pointer', fontSize: '0.8rem', padding: '0.45rem 0.95rem', borderRadius: 8, fontWeight: 700 }}>
+                  ✕ Dismiss Walkthrough
                 </button>
                 <button className="btn-primary" onClick={() => setCurrentPage('analysis')} style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }}>
                   Next Step ➔
@@ -1242,7 +1292,7 @@ function App() {
           {/* GRID: MAP ON LEFT, ACTIVE STATION CARD ON RIGHT */}
           <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: '1.5rem' }}>
             {/* MAP CARD */}
-            <div className="card" style={{ height: '560px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            <div className="card" style={{ minHeight: '640px', height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
               <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.2)' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>
                   📍 Greater {city === 'pune' ? 'Pune Metropolitan' : 'Delhi NCR'} Monitoring Grid • {stations.length} Live Nodes
@@ -1264,6 +1314,23 @@ function App() {
                     }}
                   >
                     🗺️ Street
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMapType('dark')}
+                    style={{
+                      padding: '0.25rem 0.65rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      background: mapType === 'dark' ? 'var(--primary)' : 'transparent',
+                      color: mapType === 'dark' ? '#04120e' : 'var(--text-muted)',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    🌑 Clean Dark
                   </button>
                   <button
                     type="button"
@@ -1316,6 +1383,64 @@ function App() {
                 />
               </div>
 
+              {/* INTERACTIVE 72-HOUR MAP FORECAST SCRUBBER */}
+              <div style={{ padding: '0.85rem 1.25rem', background: 'rgba(0,0,0,0.4)', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      ⏱️ 72H Map Diurnal Scrubber:
+                    </span>
+                    <span style={{ fontSize: '0.75rem', background: scrubberHour === 0 ? 'var(--primary)' : 'rgba(0,229,153,0.15)', color: scrubberHour === 0 ? '#04120e' : 'var(--primary)', padding: '2px 8px', borderRadius: 99, fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
+                      {scrubberHour === 0
+                        ? 'Now (Live Ground Telemetry)'
+                        : scrubberHour <= 3
+                        ? `+${scrubberHour}h (Evening Transition)`
+                        : scrubberHour <= 9
+                        ? `+${scrubberHour}h (Peak Night Inversion)`
+                        : scrubberHour <= 15
+                        ? `+${scrubberHour}h (Morning Rush Rush)`
+                        : `+${scrubberHour}h (Multi-Horizon ML Forecast)`}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.35rem' }}>
+                    {[0, 6, 12, 24, 48, 72].map(h => (
+                      <button
+                        key={h}
+                        type="button"
+                        onClick={() => setScrubberHour(h)}
+                        style={{
+                          padding: '2px 7px',
+                          borderRadius: 4,
+                          fontSize: '0.7rem',
+                          fontWeight: 700,
+                          background: scrubberHour === h ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                          color: scrubberHour === h ? '#04120e' : 'var(--text-muted)',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {h === 0 ? 'Live' : `+${h}h`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <input
+                    type="range"
+                    min="0"
+                    max="72"
+                    step="3"
+                    value={scrubberHour}
+                    onChange={e => setScrubberHour(Number(e.target.value))}
+                    style={{ flex: 1, accentColor: 'var(--primary)', cursor: 'pointer' }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', minWidth: 45, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                    +{scrubberHour} hrs
+                  </span>
+                </div>
+              </div>
+
               {/* MAP BOTTOM LEGEND */}
               <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-dim)', background: 'rgba(0,0,0,0.3)' }}>
                 <span>AQI Severity Scale:</span>
@@ -1334,10 +1459,10 @@ function App() {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 800, textTransform: 'uppercase' }}>
-                    ACTIVE STATION NODE • Updated 3m ago
+                    ACTIVE STATION NODE • Live CPCB & Open-Meteo Sync
                   </span>
-                  <button style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '1.1rem' }}>
-                    🔖
+                  <button onClick={() => { setCartToast(`Pinned ${selectedStation?.name?.split(',')[0]} as your primary monitoring node!`); setTimeout(() => setCartToast(''), 3000); }} title="Pin as your default home monitoring node" style={{ background: 'rgba(0,229,153,0.1)', border: '1px solid rgba(0,229,153,0.25)', color: 'var(--primary)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                    📌 Pin Primary
                   </button>
                 </div>
 
@@ -1821,10 +1946,10 @@ function App() {
                           <span style={{ fontSize: '0.65rem', background: 'var(--primary)', color: '#04120e', padding: '1px 5px', borderRadius: 4, fontWeight: 800 }}>Recommended</span>
                         </div>
                         <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#fff', marginTop: '0.5rem', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-                          11:00 AM – 2:30 PM
+                          11:30 AM – 2:30 PM (Midday)
                         </div>
                         <p style={{ fontSize: '0.74rem', color: '#c2d6ce', marginTop: '0.4rem', lineHeight: 1.4 }}>
-                          Peak solar convective mixing elevates the boundary layer and maximizes fresh air ventilation.
+                          Solar convective mixing dilutes surface soot to daily lows. For running/cardio, 2:30–5:00 PM is best before evening inversions. elevates the boundary layer and maximizes fresh air ventilation.
                         </p>
                       </div>
 
@@ -1872,7 +1997,7 @@ function App() {
                   <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Comparative environmental exposure & Berkeley Earth cigarette equivalents across all {city.toUpperCase()} nodes</p>
                 </div>
                 <span style={{ fontSize: '0.72rem', background: 'rgba(0,229,153,0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: 99, fontWeight: 800 }}>
-                  ● 5 Real-Time Stations Synced
+                  ● {stations.length} Real-Time Stations Synced ({city === 'pune' ? 'Pune Metropolitan' : 'Delhi NCR'})
                 </span>
               </div>
 
@@ -1895,7 +2020,7 @@ function App() {
                       const stAqi = stR.aqi || 142;
                       const band = getAqiBand(stAqi);
                       const stPm25 = stR.pm25 || Math.round(stAqi * 0.45) || 55;
-                      const stCigs = +(stPm25 / 22).toFixed(1);
+                      const stCigs = (stPm25 / 22).toFixed(1);
                       const stDose = +((stPm25 * 15) / 1000).toFixed(2);
                       const isSel = String(st.openaqId) === String(selectedId);
 
@@ -1909,7 +2034,7 @@ function App() {
                           }}
                         >
                           <td style={{ padding: '1rem', fontWeight: 700, color: '#fff' }}>
-                            {st.name}
+                            {st.name?.replace(/_/g, ' ')}
                             {isSel && <span style={{ marginLeft: 8, fontSize: '0.7rem', color: 'var(--primary)' }}>● Active</span>}
                           </td>
                           <td style={{ padding: '1rem' }}>
@@ -2100,7 +2225,7 @@ function App() {
                         <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
                           <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Corridor PM2.5</div>
                           <div style={{ fontSize: '1.15rem', fontWeight: 900, color: '#ff4d6d', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                            {commuteData.standardRoute?.ambientPM25} µg
+                            {commuteData.standardRoute?.ambientPM25} µg/m³
                           </div>
                         </div>
 
@@ -2147,7 +2272,7 @@ function App() {
                         <div className="subcard" style={{ padding: '0.75rem', textAlign: 'center' }}>
                           <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>Corridor PM2.5</div>
                           <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--primary)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                            {commuteData.cleanAirRoute?.ambientPM25} µg
+                            {commuteData.cleanAirRoute?.ambientPM25} µg/m³
                           </div>
                           <div style={{ fontSize: '0.65rem', color: 'var(--primary)' }}>Clean Flow</div>
                         </div>
@@ -2975,7 +3100,7 @@ function App() {
           <div className="cart-modal" onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <h2 style={{ fontSize: '1.35rem', fontWeight: 900 }}>🛒 Your SAANS Protection Cart</h2>
-              <button onClick={() => setIsCartOpen(false)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '1.25rem' }}>✕</button>
+              <button onClick={() => setIsCartOpen(false)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', fontWeight: 700 }} title="Close Cart">✕</button>
             </div>
 
             {cart.length > 0 ? (
@@ -3010,10 +3135,10 @@ function App() {
                         <button
                           type="button"
                           onClick={() => handleRemoveFromCart(it._id)}
-                          title="Remove item"
-                          style={{ marginLeft: 6, background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: '0.75rem' }}
+                          title="Remove item from cart"
+                          style={{ marginLeft: 8, background: 'rgba(239, 68, 68, 0.18)', color: '#ff6b6b', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}
                         >
-                          ✕
+                          🗑️ Remove
                         </button>
                       </div>
 

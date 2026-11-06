@@ -165,35 +165,79 @@ export const DEMO_STATIONS = [
  * station, aqi, pm25, pm10, no2, o3, temperature, humidity, windSpeed, visibility, dominantPollutant, timestamp
  */
 export function generateDemoReadings(stationId, stationObjectId = null) {
-  const isDelhi = Number(stationId) >= 7000;
-  const basePM25 = isDelhi ? 95 : (Number(stationId) === 3409331 ? 68 : 46);
+  const idNum = Number(stationId);
+  const isDelhi = idNum >= 7000;
   const now = Date.now();
   const currentHour = Math.floor(now / 3600000) * 3600000;
   const readings = [];
+
+  // Distinct microclimate baseline and offsets per station
+  let basePM25 = 48;
+  let tempOffset = 0;
+  let humOffset = 0;
+  let windOffset = 0;
+
+  if (idNum === 11610) {
+    // Nigdi / Akurdi (PCCOE Vicinity) — suburban plateau
+    basePM25 = 52;
+    tempOffset = 0.5;
+    humOffset = 2;
+    windOffset = 1.2;
+  } else if (idNum === 11613) {
+    // Shivajinagar — central urban river basin
+    basePM25 = 62;
+    tempOffset = 1.8;
+    humOffset = -4;
+    windOffset = -1.6;
+  } else if (idNum === 3409436) {
+    // Wakad / Hinjewadi IT Corridor — breezy westerly bypass
+    basePM25 = 26;
+    tempOffset = -0.6;
+    humOffset = 4;
+    windOffset = 3.2;
+  } else if (idNum === 3409331) {
+    // Bhosari Industrial Area — heavy particulate & thermal trap
+    basePM25 = 78;
+    tempOffset = 2.4;
+    humOffset = -7;
+    windOffset = -2.4;
+  } else if (idNum === 3409438) {
+    // Katraj Dairy — southern hillside buffer
+    basePM25 = 38;
+    tempOffset = -2.1;
+    humOffset = 8;
+    windOffset = 0.6;
+  } else if (isDelhi) {
+    basePM25 = idNum === 7001 ? 138 : (idNum === 7002 ? 112 : 94);
+    tempOffset = -4.0;
+    humOffset = -12;
+    windOffset = -3.5;
+  }
 
   for (let offset = 95; offset >= 0; offset--) {
     const timestamp = new Date(currentHour - offset * 3600000);
     const hour = timestamp.getHours();
 
-    // Diurnal variation: morning traffic/inversion spike (7-9 AM) and night accumulation (8-10 PM)
+    // Diurnal variation: morning traffic/inversion spike (7-10 AM) and evening stagnation (7-10 PM)
     let diurnalFactor = 1.0;
-    if (hour >= 7 && hour <= 10) diurnalFactor = 1.45;
-    else if (hour >= 13 && hour <= 16) diurnalFactor = 0.75;
-    else if (hour >= 20 && hour <= 23) diurnalFactor = 1.35;
+    if (hour >= 7 && hour <= 10) diurnalFactor = 1.38;
+    else if (hour >= 12 && hour <= 15) diurnalFactor = 0.72;
+    else if (hour >= 19 && hour <= 22) diurnalFactor = 1.32;
 
-    const noise = Math.sin(offset * 0.4) * 6 + Math.cos(offset * 0.15) * 4;
+    const noise = Math.sin(offset * 0.4) * 4 + Math.cos(offset * 0.15) * 3;
     const pm25 = Math.max(12, Math.round(basePM25 * diurnalFactor + noise));
-    const pm10 = Math.round(pm25 * 1.82 + Math.sin(offset) * 8);
-    const no2 = Math.round(pm25 * 0.52 + (hour >= 8 && hour <= 11 ? 15 : 0));
-    const o3 = Math.max(10, Math.round(52 - diurnalFactor * 14));
-    const so2 = Math.round(pm25 * 0.18);
-    const co = +(pm25 * 0.014).toFixed(2);
+    const pm10 = Math.round(pm25 * 1.78 + Math.sin(offset) * 6);
+    const no2 = Math.max(14, Math.round(pm25 * 0.44 + (hour >= 8 && hour <= 11 ? 14 : 0) + (tempOffset > 1 ? 6 : 0)));
+    // Ground ozone: secondary photochemical pollutant peaking at midday, never zero
+    const o3 = Math.max(18, Math.round(32 + Math.sin((hour - 10) / 4) * 14 + (isDelhi ? 8 : 0)));
+    const so2 = Math.max(6, Math.round(pm25 * 0.16 + (idNum === 3409331 ? 8 : 0)));
+    const co = +(Math.max(0.3, pm25 * 0.012)).toFixed(2);
 
-    // Weather metrics
-    const temperature = +(24 + Math.sin((hour - 8) / 4) * 6).toFixed(1);
-    const humidity = Math.min(95, Math.max(30, Math.round(65 - (temperature - 24) * 3)));
-    const windSpeed = +(8 + Math.cos(hour / 3) * 4).toFixed(1);
-    const visibility = +(Math.max(1.5, (10 - (pm25 / 40)))).toFixed(1);
+    // Weather metrics with station-specific microclimate variation
+    const temperature = +(24 + tempOffset + Math.sin((hour - 8) / 4) * 5.8).toFixed(1);
+    const humidity = Math.min(92, Math.max(28, Math.round(58 + humOffset - (temperature - 24) * 2.8)));
+    const windSpeed = +(Math.max(2.4, 9.6 + windOffset + Math.cos(hour / 3) * 3.6)).toFixed(1);
+    const visibility = +(Math.max(1.2, (10 - (pm25 / 45)))).toFixed(1);
 
     const { aqi, dominantPollutant } = calculateCpcbAqi(pm25, pm10);
 

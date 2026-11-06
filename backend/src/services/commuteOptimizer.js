@@ -161,28 +161,28 @@ export function optimizeCommuteRoute({
   const percentSaved = stdDoseUg > 0 ? Math.round((doseSavedUg / stdDoseUg) * 100) : 0;
   const extraTimeMins = corridor.cleanAirRoute.travelTimeMins - corridor.standardRoute.travelTimeMins;
 
-  // 4. Optimal Departure Time Windows
+  // 4. Practical Commute Departure Windows (Synchronized with Daily Schedule)
   const departureWindows = [
     {
-      window: '8:00 AM – 9:30 AM',
-      tag: 'Morning Rush Hour',
-      risk: 'High Smog / Inversion Risk',
-      aqiMultiplier: 1.25,
-      recommendation: 'Wear N95 respirator. Heavy diesel truck emissions.',
+      window: 'Depart before 7:45 AM (or after 9:45 AM)',
+      tag: 'Smart Morning Window',
+      risk: 'Moderate Exposure',
+      aqiMultiplier: 0.92,
+      recommendation: 'Avoid peak 8:15–9:30 AM diesel stagnation. If commuting during peak rush, use the Eco-Corridor with N95.',
     },
     {
-      window: '11:30 AM – 2:30 PM',
-      tag: 'Thermal Mixing Peak',
-      risk: 'Safest Commute Window',
-      aqiMultiplier: 0.78,
-      recommendation: 'Recommended window! High solar convection dissipates ground-level plume.',
+      window: '11:30 AM – 2:30 PM (Midday Solar Convection)',
+      tag: 'Atmospheric Convection Peak',
+      risk: 'Cleanest Ambient Air (-35% Exposure)',
+      aqiMultiplier: 0.75,
+      recommendation: 'Best for flexible travel/meetings. Peak solar heating lifts soot vertically out of road trenches.',
     },
     {
-      window: '6:00 PM – 8:30 PM',
-      tag: 'Evening Gridlock',
-      risk: 'Highest Particulate Stagnation',
-      aqiMultiplier: 1.35,
-      recommendation: 'Avoid two-wheeler commute if asthmatic. Use Eco-Corridor.',
+      window: 'Depart after 8:15 PM (or 4:30–5:30 PM)',
+      tag: 'Smart Evening Window',
+      risk: 'Lower Congestion',
+      aqiMultiplier: 0.88,
+      recommendation: 'Avoid peak 6:30–8:00 PM evening gridlock when dropping temperature traps exhaust near ground.',
     },
   ];
 
