@@ -110,6 +110,7 @@ body {
   font-size: 0.85rem;
   font-weight: 600;
   padding: 0.5rem 0.85rem;
+  white-space: nowrap;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -323,6 +324,25 @@ body {
   overflow-x: auto;
   padding-bottom: 0.5rem;
   scrollbar-width: thin;
+  scrollbar-color: rgba(0, 229, 153, 0.3) rgba(255, 255, 255, 0.03);
+}
+
+.station-pills-row::-webkit-scrollbar {
+  height: 5px;
+}
+
+.station-pills-row::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 99px;
+}
+
+.station-pills-row::-webkit-scrollbar-thumb {
+  background: rgba(0, 229, 153, 0.3);
+  border-radius: 99px;
+}
+
+.station-pills-row::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
 }
 
 .station-pill {

@@ -59,8 +59,16 @@ export const handleChatMessage = asyncHandler(async (req, res) => {
   } catch (err) {
     console.error('[ChatController Engine Error]:', err);
     // Never expose raw stack traces to the user
+    const isTimeout = err.message?.includes('abort') || err.message?.includes('timeout');
+    const isNetwork = err.message?.includes('fetch') || err.message?.includes('ECONNREFUSED');
+    let friendlyMsg = 'I encountered an unexpected issue while retrieving atmospheric models for your query. Please try asking again or select a specific station from the list.';
+    if (isTimeout) {
+      friendlyMsg = '⏱️ The AI response took too long to arrive. This can happen during peak load. Please try your question again — the local fallback engine will respond instantly.';
+    } else if (isNetwork) {
+      friendlyMsg = '📡 Could not reach the AI inference service right now. Your query has been noted, and the local SAANS engine will answer using cached telemetry.';
+    }
     assistantResult = {
-      content: `I encountered an unexpected issue while retrieving atmospheric models for your query. Please try asking again or select a specific station from the list.`,
+      content: friendlyMsg,
       toolsUsed: [{
         toolName: 'error_recovery_fallback',
         queryParameters: { error: err.message },

@@ -145,14 +145,16 @@ export function optimizeCommuteRoute({
   const stdHours = corridor.standardRoute.travelTimeMins / 60;
   const stdVolM3 = +(ventRate * stdHours).toFixed(2);
   const stdDoseUg = +(stdPM25 * stdVolM3).toFixed(1);
-  const stdCigarettes = +(stdDoseUg / (22 * 0.9)).toFixed(2); // Berkeley Earth equivalence for commute dose
+  // Berkeley Earth equivalence: 22 µg/m³ × 15 m³/day = 330 µg/day ≈ 1 cigarette
+  // For a commute dose (µg inhaled), divide by 330 to get fraction-of-a-cigarette
+  const stdCigarettes = +(stdDoseUg / 330).toFixed(2);
 
   // 2. Calculate Clean Air Eco-Corridor Metrics
   const cleanPM25 = Math.round(basePM25 * corridor.cleanAirRoute.exposureFactor);
   const cleanHours = corridor.cleanAirRoute.travelTimeMins / 60;
   const cleanVolM3 = +(ventRate * cleanHours).toFixed(2);
   const cleanDoseUg = +(cleanPM25 * cleanVolM3).toFixed(1);
-  const cleanCigarettes = +(cleanDoseUg / (22 * 0.9)).toFixed(2);
+  const cleanCigarettes = +(cleanDoseUg / 330).toFixed(2);
 
   // 3. Differential Impact
   const doseSavedUg = +(stdDoseUg - cleanDoseUg).toFixed(1);

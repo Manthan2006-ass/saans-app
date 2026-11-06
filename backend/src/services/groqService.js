@@ -87,9 +87,9 @@ Operational Guidelines:
     // Append latest user message
     messages.push({ role: 'user', content: message });
 
-    // Call Groq Cloud API with 9-second timeout
+    // Call Groq Cloud API with 12-second timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 9000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     const response = await fetch(GROQ_API_URL, {
       method: 'POST',
@@ -109,6 +109,7 @@ Operational Guidelines:
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       console.warn(`[Groq API Warning]: HTTP ${response.status} - ${errText.slice(0, 150)}`);
+      // On rate-limit (429) or server error (5xx), fall back to local engine
       return null;
     }
 

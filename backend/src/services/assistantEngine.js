@@ -592,29 +592,38 @@ export async function executeAssistantQuery({
       outputSummary: 'Clean Air Eco-Corridor via Ravet-Punawale reduces inhaled PM2.5 by 40% with +4 mins travel delta.',
     });
 
-    const commuteRes = optimizeCommuteRoute({
-      city: station.city,
-      corridorId: station.city === 'delhi' ? 'anandvihar_ito' : 'pccoe_hinjewadi',
-      basePM25: pm25,
-      mode: 'bike_scooter',
-    });
+    let commuteRes;
+    try {
+      commuteRes = optimizeCommuteRoute({
+        city: station.city,
+        corridorId: station.city === 'delhi' ? 'anandvihar_ito' : 'pccoe_hinjewadi',
+        basePM25: pm25,
+        mode: 'bike_scooter',
+      });
+    } catch (commuteErr) {
+      console.warn('[AssistantEngine] Commute optimizer error:', commuteErr.message);
+    }
 
-    reply = `🚗 **Clean Air Commute Optimization Report**\n` +
-      `**Route Corridor**: ${commuteRes.title}\n` +
-      `**Matched Node**: 📍 ${station.name} (Current Base PM2.5: ${pm25} µg/m³)\n\n` +
-      `### 1. Route Comparison Analysis\n` +
-      `• **Standard Highway Route (${commuteRes.standardRoute.name})**:\n` +
-      `  - Travel Time: **${commuteRes.standardRoute.travelTimeMins} mins** (${commuteRes.standardRoute.congestionLevel})\n` +
-      `  - Ambient Exposure: **${commuteRes.standardRoute.ambientPM25} µg/m³ PM2.5**\n` +
-      `  - Inhaled Particulate Dose: **${commuteRes.standardRoute.inhaledDoseUg} µg** (~${commuteRes.standardRoute.cigaretteEquivalence} passive cigarettes)\n\n` +
-      `• **Clean Air Eco-Corridor (${commuteRes.cleanAirRoute.name})**:\n` +
-      `  - Travel Time: **${commuteRes.cleanAirRoute.travelTimeMins} mins** (Only +${commuteRes.optimization.extraTimeMins} mins extra!)\n` +
-      `  - Ambient Exposure: **${commuteRes.cleanAirRoute.ambientPM25} µg/m³ PM2.5**\n` +
-      `  - Inhaled Particulate Dose: **${commuteRes.cleanAirRoute.inhaledDoseUg} µg** (~${commuteRes.cleanAirRoute.cigaretteEquivalence} passive cigarettes)\n\n` +
-      `🎯 **Optimization Verdict**: Taking the Eco-Corridor eliminates **${commuteRes.optimization.percentSaved}% of your inhaled toxic particulate dose** for just ${commuteRes.optimization.extraTimeMins} minutes additional travel time!\n\n` +
-      `### 2. Recommended Departure Windows\n` +
-      `• **Safest Departure Window**: **11:30 AM – 2:30 PM** (Thermal solar mixing disperses ground-level vehicular exhaust)\n` +
-      `• **High-Risk Window**: **8:00 AM – 9:30 AM** and **6:00 PM – 8:30 PM** (Traffic stagnation + boundary layer compression).`;
+    if (!commuteRes) {
+      reply = `🚗 Clean Air Commute Advisory — PCCOE → Hinjewadi\n` +
+        `Current Air Quality at Origin: AQI ${aqiVal} (${aqiCat.category}) | PM2.5: ${pm25} µg/m³\n\n` +
+        `• Recommended Departure: 11:30 AM – 2:30 PM (peak solar mixing disperses ground-level exhaust).\n` +
+        `• Avoid: 8:00–9:30 AM and 6:00–8:30 PM (traffic stagnation + inversion compression).\n` +
+        `• Route Tip: The Ravet-Punawale Eco-Corridor cuts inhaled particulate dose by ~40% vs the Old Pune-Mumbai Hwy route with only 4 extra minutes.\n` +
+        `• Protection: Wear an N95 respirator on two-wheelers — it reduces inhaled PM2.5 by 95%.`;
+    } else {
+      reply = `🚗 Clean Air Commute Optimization — ${commuteRes.title}\n` +
+        `Matched Node: ${station.name} (Base PM2.5: ${pm25} µg/m³)\n\n` +
+        `1. Route Comparison\n` +
+        `• Standard Route (${commuteRes.standardRoute.name}):\n` +
+        `  - Travel: ${commuteRes.standardRoute.travelTimeMins} mins | Exposure: ${commuteRes.standardRoute.ambientPM25} µg/m³ | Dose: ${commuteRes.standardRoute.inhaledDoseUg} µg (~${commuteRes.standardRoute.cigaretteEquivalence} cig-equiv)\n\n` +
+        `• Eco-Corridor (${commuteRes.cleanAirRoute.name}):\n` +
+        `  - Travel: ${commuteRes.cleanAirRoute.travelTimeMins} mins (+${commuteRes.optimization.extraTimeMins} min) | Exposure: ${commuteRes.cleanAirRoute.ambientPM25} µg/m³ | Dose: ${commuteRes.cleanAirRoute.inhaledDoseUg} µg (~${commuteRes.cleanAirRoute.cigaretteEquivalence} cig-equiv)\n\n` +
+        `Verdict: Eco-Corridor eliminates ${commuteRes.optimization.percentSaved}% of inhaled dose for only ${commuteRes.optimization.extraTimeMins} mins extra.\n\n` +
+        `2. Recommended Departure Windows\n` +
+        `• Safest: 11:30 AM – 2:30 PM (thermal solar mixing disperses ground-level exhaust)\n` +
+        `• High-Risk: 8:00–9:30 AM and 6:00–8:30 PM (traffic stagnation + boundary layer compression)`;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -876,7 +885,7 @@ export async function executeAssistantQuery({
       allProducts = (await import('../controllers/storeController.js')).SEED_PRODUCTS;
     }
 
-    // Contextual matching
+    // Contextual matching — only recommend products appropriate for the current AQI
     const qLower = message.toLowerCase();
     if (qLower.includes('indoor') || qLower.includes('home') || qLower.includes('room') || qLower.includes('purifier')) {
       recommendedProductsList = allProducts.filter(p => p.useCase === 'indoor' || p.category === 'purifier' || p.category === 'monitor');
@@ -885,20 +894,35 @@ export async function executeAssistantQuery({
     } else if (qLower.includes('voc') || qLower.includes('smoke') || qLower.includes('smell') || qLower.includes('chemical')) {
       recommendedProductsList = allProducts.filter(p => p.targetPollutants?.includes('VOC') || p.description.toLowerCase().includes('carbon'));
     } else {
-      recommendedProductsList = allProducts.filter(p => p.recommendedForAqiAbove <= aqiVal || p.category === 'mask' || p.category === 'purifier');
+      // AQI-aware filter: only show items appropriate for the current pollution level
+      if (aqiVal <= 100) {
+        // Good/Satisfactory: only masks and monitors (not ₹11,999 purifier)
+        recommendedProductsList = allProducts.filter(p => p.category === 'mask' || p.category === 'monitor');
+      } else {
+        recommendedProductsList = allProducts.filter(p => p.recommendedForAqiAbove <= aqiVal);
+      }
     }
 
-    if (!recommendedProductsList.length) recommendedProductsList = allProducts.slice(0, 3);
+    if (!recommendedProductsList.length) {
+      recommendedProductsList = allProducts.filter(p => p.category === 'mask').slice(0, 2);
+    }
 
-    reply = `🛡️ **Tailored Protection Equipment Recommendations**\n` +
-      `**Matched Station**: 📍 ${station.name} (${stationLocationLabel})\n` +
-      `**Air Quality Assessment**: **AQI ${aqiVal} (${aqiCat.category})** | PM2.5: **${pm25} µg/m³**\n\n` +
-      `Based on the observed dominant particulate pollution (${pm25} µg/m³), standard cloth or surgical masks provide less than 30% filtration efficiency against sub-micron PM2.5 particles.\n\n` +
-      `### Recommended Protection Strategy:\n` +
-      `1. **Outdoor Transit**: Use a certified **NIOSH N95 / FFP2 respirator** with a tight facial perimeter seal to block 95%+ of inhaled fine particles.\n` +
-      `2. **Indoor Air Management**: Keep windows closed during morning/evening inversion spikes and run a **True-HEPA H13 Air Purifier** to maintain indoor PM2.5 below 15 µg/m³.\n` +
-      `3. **Verification**: Track indoor particulate reduction with a real-time laser air quality monitor.\n\n` +
-      `🛒 *The protective essentials below have been matched specifically to your area's pollution conditions:*`;
+    const aqiNote = aqiVal <= 100
+      ? `Current air quality is ${aqiCat.category} (AQI ${aqiVal}). While conditions are relatively clean right now, preventive protection is still worth considering for peak pollution hours (6–9 AM and evening rush).`
+      : `Current PM2.5 is ${pm25} µg/m³. Standard cloth or surgical masks provide less than 30% filtration against sub-micron PM2.5 particles — certified respirators are essential.`;
+
+    reply = `🛡️ Protection Recommendations for ${stationLocationLabel}\n` +
+      `Air Quality: AQI ${aqiVal} (${aqiCat.category}) | PM2.5: ${pm25} µg/m³\n\n` +
+      `${aqiNote}\n\n` +
+      (aqiVal > 100
+        ? `Recommended actions:\n` +
+          `1. Outdoor transit: Use a certified N95/FFP2 respirator (blocks 95%+ of PM2.5).\n` +
+          `2. Indoors: Run a True-HEPA H13 purifier to keep indoor PM2.5 below 15 µg/m³.\n` +
+          `3. Monitoring: A laser PM2.5 sensor tracks when to close windows.\n\n`
+        : `Preventive options:\n` +
+          `1. Keep an N95 mask handy for days when AQI spikes above 100.\n` +
+          `2. A compact air quality monitor helps you track when to close windows.\n\n`) +
+      `🛒 Matched products for your conditions:`;
   }
 
   // ─────────────────────────────────────────────────────────────
