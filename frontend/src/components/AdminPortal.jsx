@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 export default function AdminPortal({ onBackToDashboard }) {
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem('saans_admin_token') || '');
-  const [loginForm, setLoginForm] = useState({ username: 'admin123', password: 'admin@123' });
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
@@ -218,7 +218,7 @@ export default function AdminPortal({ onBackToDashboard }) {
                 type="text"
                 value={loginForm.username}
                 onChange={e => setLoginForm({ ...loginForm, username: e.target.value })}
-                placeholder="admin123"
+                placeholder="Enter username or email"
                 required
                 style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.75rem 1rem', color: '#fff' }}
               />
@@ -236,10 +236,6 @@ export default function AdminPortal({ onBackToDashboard }) {
                 required
                 style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.75rem 1rem', color: '#fff' }}
               />
-            </div>
-
-            <div style={{ background: 'rgba(0, 229, 153, 0.05)', padding: '0.65rem 0.85rem', borderRadius: 8, fontSize: '0.75rem', color: 'var(--text-muted)', border: '1px solid rgba(0, 229, 153, 0.15)' }}>
-              🔑 <strong>Configured Demo Credentials</strong>: Username <code style={{ color: 'var(--primary)', fontWeight: 800 }}>admin123</code> &nbsp;|&nbsp; Password <code style={{ color: 'var(--primary)', fontWeight: 800 }}>admin@123</code>
             </div>
 
             <button type="submit" className="btn-primary" disabled={loginLoading} style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center', padding: '0.85rem' }}>
