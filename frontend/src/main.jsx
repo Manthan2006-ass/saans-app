@@ -104,13 +104,6 @@ function MapRecenter({ city }) {
 }
 
 const MAP_TILE_PROVIDERS = {
-  dark: {
-    name: 'Dark Carto',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    subdomains: ['a', 'b', 'c', 'd'],
-    maxZoom: 19,
-    attribution: '&copy; CartoDB &copy; OpenStreetMap',
-  },
   satellite: {
     name: 'Satellite',
     url: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
@@ -120,10 +113,24 @@ const MAP_TILE_PROVIDERS = {
   },
   street: {
     name: 'Street',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    subdomains: ['a', 'b', 'c', 'd'],
-    maxZoom: 19,
-    attribution: '&copy; CartoDB Voyager',
+    url: 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    maxZoom: 20,
+    attribution: '&copy; Google Maps',
+  },
+  dark: {
+    name: 'Clean Dark',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    subdomains: [],
+    maxZoom: 16,
+    attribution: '&copy; Esri &copy; OpenStreetMap',
+  },
+  terrain: {
+    name: 'Terrain',
+    url: 'https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    maxZoom: 20,
+    attribution: '&copy; Google Maps',
   },
 };
 
@@ -224,7 +231,7 @@ function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [orderToast, setOrderToast] = useState(false);
   const [cartToast, setCartToast] = useState('');
-  const [mapType, setMapType] = useState('dark'); // 'satellite' | 'street' | 'terrain'
+  const [mapType, setMapType] = useState('satellite'); // 'satellite' | 'street' | 'terrain'
 
   useEffect(() => {
     try {
@@ -1398,7 +1405,7 @@ function App() {
                         : scrubberHour <= 9
                         ? `+${scrubberHour}h (Peak Night Inversion)`
                         : scrubberHour <= 15
-                        ? `+${scrubberHour}h (Morning Rush Rush)`
+                        ? `+${scrubberHour}h (Morning Commute Rush)`
                         : `+${scrubberHour}h (Multi-Horizon ML Forecast)`}
                     </span>
                   </div>
