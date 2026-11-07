@@ -214,7 +214,8 @@ export function generateDemoReadings(stationId, stationObjectId = null) {
     windOffset = -3.5;
   }
 
-  for (let offset = 95; offset >= 0; offset--) {
+  // Generate 7 full days of historical readings (168 hours)
+  for (let offset = 167; offset >= 0; offset--) {
     const timestamp = new Date(currentHour - offset * 3600000);
     const hour = timestamp.getHours();
 
