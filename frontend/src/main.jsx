@@ -564,106 +564,113 @@ function App() {
           TOPBAR NAVBAR
           ──────────────────────────────────────────────────────── */}
       <header className="topbar">
-        <div className="wrap toprow">
-          {/* LOGO */}
+        <div className="toprow">
+          {/* BRAND */}
           <div className="brand-group" onClick={() => setCurrentPage('home')}>
             <div className="brand-logo-icon">◈</div>
             <div>
               <div className="brand">SAANS</div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--primary)', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: '0.62rem', color: 'var(--primary)', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 Air Intelligence
               </div>
             </div>
           </div>
 
-          {/* MAIN NAV LINKS */}
+          {/* MAIN FLOATING NAV CAPSULE (ALL 7 TABS PRESERVED, ELEGANTLY GROUPED) */}
           <nav className="nav-links">
             <button className={`nav-btn ${currentPage === 'home' ? 'active' : ''}`} onClick={() => setCurrentPage('home')}>Home</button>
             <button className={`nav-btn ${currentPage === 'problem' ? 'active' : ''}`} onClick={() => setCurrentPage('problem')}>Problem</button>
             <button className={`nav-btn ${currentPage === 'solution' ? 'active' : ''}`} onClick={() => setCurrentPage('solution')}>Solution</button>
+            <span className="nav-divider" />
             <button className={`nav-btn ${currentPage === 'analysis' ? 'active' : ''}`} onClick={() => setCurrentPage('analysis')}>Unified Analysis</button>
             <button className={`nav-btn ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>Dashboard</button>
             <button className={`nav-btn ${currentPage === 'assistant' ? 'active' : ''}`} onClick={() => setCurrentPage('assistant')}>AI Assistant</button>
-            <button className={`nav-btn ${currentPage === 'admin' ? 'active' : ''}`} onClick={() => setCurrentPage('admin')} title="Demo Control Panel for Evaluation">🔐 Admin <span style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: 4, marginLeft: 2 }}>Demo</span></button>
+            <span className="nav-divider" />
+            <button className={`nav-btn ${currentPage === 'admin' ? 'active' : ''}`} onClick={() => setCurrentPage('admin')} title="Demo Control Panel for Evaluation">
+              🔐 Admin <span style={{ fontSize: '0.62rem', opacity: 0.75 }}>Demo</span>
+            </button>
           </nav>
 
-          {/* UTILITY CONTROLS */}
-          <div className="top-actions">
-            <div className="pill-status">
-              <span style={{ fontSize: '0.7rem' }}>●</span> API Online
-            </div>
-
-            {/* CITY TOGGLE */}
-            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: 2 }}>
-              <button
-                onClick={() => setCity('pune')}
-                style={{
-                  background: city === 'pune' ? 'var(--primary)' : 'transparent',
-                  color: city === 'pune' ? '#04120e' : 'var(--text-muted)',
-                  border: 'none',
-                  padding: '0.35rem 0.65rem',
-                  borderRadius: 6,
-                  fontWeight: 700,
-                  fontSize: '0.75rem',
-                  cursor: 'pointer'
-                }}
-              >
-                Pune
-              </button>
-              <button
-                onClick={() => setCity('delhi')}
-                style={{
-                  background: city === 'delhi' ? 'var(--primary)' : 'transparent',
-                  color: city === 'delhi' ? '#04120e' : 'var(--text-muted)',
-                  border: 'none',
-                  padding: '0.35rem 0.65rem',
-                  borderRadius: 6,
-                  fontWeight: 700,
-                  fontSize: '0.75rem',
-                  cursor: 'pointer'
-                }}
-              >
-                Delhi
-              </button>
-            </div>
-
-            {/* AUTH / PROFILE ACTION */}
-            {userProfile ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {/* UTILITY ACTIONS: 2 BALANCED, UNIFIED CAPSULES */}
+          <div className="top-actions" style={{ gap: '0.65rem' }}>
+            {/* CAPSULE 1: LIVE STATUS & CITY SELECTOR */}
+            <div className="network-capsule">
+              <div className="status-indicator-compact" title="Real-time CPCB ground telemetry active">
+                <span className="status-dot-pulse" />
+                <span>Live</span>
+              </div>
+              <div className="city-pill-group">
                 <button
-                  className="pill-btn"
-                  onClick={() => setCurrentPage('profile')}
-                  style={{ background: 'rgba(0, 229, 153, 0.08)', borderColor: 'var(--primary)', color: '#fff' }}
-                  title="View your personalized health profile"
+                  type="button"
+                  className={`city-pill-btn ${city === 'pune' ? 'active' : ''}`}
+                  onClick={() => setCity('pune')}
                 >
-                  👤 {userProfile.name?.split(' ')[0] || 'Profile'} {userProfile.healthProfile?.asthma ? '🫁' : ''}
+                  Pune
                 </button>
                 <button
-                  className="pill-btn"
-                  onClick={handleLogout}
-                  style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', fontSize: '0.74rem', padding: '0.35rem 0.65rem', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}
-                  title="Sign out of session"
+                  type="button"
+                  className={`city-pill-btn ${city === 'delhi' ? 'active' : ''}`}
+                  onClick={() => setCity('delhi')}
                 >
-                  Sign Out
+                  Delhi
                 </button>
               </div>
-            ) : (
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  setAuthTab('login');
-                  setAuthError('');
-                  setIsAuthModalOpen(true);
-                }}
-                style={{ padding: '0.35rem 0.85rem', fontSize: '0.75rem', borderRadius: 8 }}
-              >
-                🔑 Sign In / Register
-              </button>
-            )}
+            </div>
 
-            <button className="pill-btn pill-cart" onClick={() => setIsCartOpen(true)}>
-              🛒 Cart ({cart.reduce((s, i) => s + i.quantity, 0)})
-            </button>
+            {/* CAPSULE 2: USER ACCOUNT, CART & LOGOUT */}
+            <div className="user-account-capsule">
+              {userProfile ? (
+                <>
+                  <button
+                    type="button"
+                    className="user-profile-pill"
+                    onClick={() => setCurrentPage('profile')}
+                    title="View personalized respiratory profile"
+                  >
+                    <span>👤</span>
+                    <span>{userProfile.name?.split(' ')[0] || 'Profile'}</span>
+                    {userProfile.healthProfile?.asthma && <span title="Asthma sensitivity profile active">🫁</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="cart-pill-badge"
+                    onClick={() => setIsCartOpen(true)}
+                    title="View protection essentials cart"
+                  >
+                    🛒 <span>{cart.reduce((s, i) => s + i.quantity, 0)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="signout-pill-btn"
+                    onClick={handleLogout}
+                    title="Sign out of current session"
+                  >
+                    Sign Out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="user-profile-pill"
+                    onClick={() => {
+                      setAuthTab('login');
+                      setAuthError('');
+                      setIsAuthModalOpen(true);
+                    }}
+                  >
+                    🔑 Sign In
+                  </button>
+                  <button
+                    type="button"
+                    className="cart-pill-badge"
+                    onClick={() => setIsCartOpen(true)}
+                  >
+                    🛒 <span>{cart.reduce((s, i) => s + i.quantity, 0)}</span>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
